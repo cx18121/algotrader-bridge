@@ -84,7 +84,7 @@ class PositionOut(_Out):
     trail_stop_price: Optional[float] = None
 
 
-class AccountOut(BaseModel):
+class AccountOut(_Out):
     net_liquidation: Optional[float] = None
     total_cash: Optional[float] = None
     unrealized_pnl: Optional[float] = None
