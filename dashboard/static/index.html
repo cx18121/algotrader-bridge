@@ -727,9 +727,10 @@ function renderAccount() {
     el.textContent = fmtUsd(v);
     el.className = "value" + (signed && v > 0 ? " pos" : signed && v < 0 ? " neg" : "");
   };
+  const hasPositions = state.positions && state.positions.length > 0;
   set("#a-net", a ? a.net_liquidation : null, false);
   set("#a-cash", a ? a.total_cash : null, false);
-  set("#a-upl", a ? a.unrealized_pnl : null, true);
+  set("#a-upl", (a && hasPositions) ? a.unrealized_pnl : 0, true);
   set("#a-rpl", a ? a.realized_pnl : null, true);
   qs("#a-net").parentElement.parentElement.classList.toggle("stale", state.stale);
 }
