@@ -364,6 +364,17 @@ class OrderRouter:
                 exchange=exchange,
             )
 
+        asyncio.create_task(self._refresh_account_after_fill())
+
+    async def _refresh_account_after_fill(self) -> None:
+        await asyncio.sleep(2)
+        try:
+            summary = await self.ibkr_client.get_account_summary()
+            if summary:
+                await self.broadcast("account_update", summary)
+        except Exception as e:
+            log.warning("account_refresh_after_fill_error", extra={"error": str(e)})
+
     async def _process_fill(
         self,
         ibkr_order_id: int,
