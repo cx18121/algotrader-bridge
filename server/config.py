@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 # TradingView raw {{interval}} string -> normalized label
 _INTERVAL_MAP = {
+    "1S": "1s",
     "1": "1m",
     "3": "3m",
     "5": "5m",
@@ -28,7 +29,7 @@ _INTERVAL_MAP = {
 }
 
 # Already-normalized labels are accepted as-is (idempotent).
-_NORMALIZED_INTERVALS = {"1m", "3m", "5m", "15m", "30m", "45m", "1h"}
+_NORMALIZED_INTERVALS = {"1s", "1m", "3m", "5m", "15m", "30m", "45m", "1h"}
 
 
 def normalize_interval(raw: Optional[str]) -> Optional[str]:
