@@ -466,6 +466,15 @@ class _ClosePositionIn(BaseModel):
     interval: Optional[str] = None
 
 
+@router.get("/admin/ibkr-positions", dependencies=[Depends(_auth_guard)])
+async def admin_ibkr_positions() -> list:
+    from .main import get_state
+    ibkr = get_state().get("ibkr")
+    if ibkr is None:
+        return []
+    return await ibkr.get_positions()
+
+
 @router.post("/admin/close-position", dependencies=[Depends(_auth_guard)])
 async def admin_close_position(body: _ClosePositionIn) -> dict:
     sig_id = await webhook_module.inject_close_signal(body.symbol, body.direction, body.interval)
