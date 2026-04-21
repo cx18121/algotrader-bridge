@@ -18,6 +18,9 @@ log = logging.getLogger(__name__)
 
 # Maps raw_action -> (order_side, position_action, direction).
 # For kernel signals all three are None.
+# "buy"/"sell" are generic strategy orders (Pine strategy.entry/strategy.exit);
+# they carry no direction info and are resolved against current DB position state
+# in webhook.py before routing.
 _ACTION_META = {
     "open_long":      ("BUY",  "open",  "long"),
     "close_long":     ("SELL", "close", "long"),
@@ -25,9 +28,12 @@ _ACTION_META = {
     "close_short":    ("BUY",  "close", "short"),
     "kernel_bullish": (None,   None,    None),
     "kernel_bearish": (None,   None,    None),
+    "buy":            ("BUY",  None,    None),
+    "sell":           ("SELL", None,    None),
 }
 
 VALID_ACTIONS = set(_ACTION_META.keys())
+GENERIC_ACTIONS = {"buy", "sell"}
 
 
 class SignalParseError(Exception):
@@ -101,9 +107,10 @@ def _try_parse_json(text: str) -> Optional[ParsedSignal]:
         # Not a recognized action — let plaintext path handle it, but if the body
         # was clearly JSON the plaintext parser will reject too.
         raise SignalParseError(f"invalid action: {action!r}")
-    symbol = payload.get("symbol")
+    # Accept "symbol" (preferred) or "instrument" (Pine strategy alert alias).
+    symbol = payload.get("symbol") or payload.get("instrument")
     if not isinstance(symbol, str) or not symbol.strip():
-        raise SignalParseError("missing or empty symbol")
+        raise SignalParseError("missing or empty symbol (or instrument)")
     close_price = _coerce_float(payload.get("close"))
     interval_raw = payload.get("interval")
     interval = normalize_interval(interval_raw if isinstance(interval_raw, str) else None)

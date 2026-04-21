@@ -115,6 +115,10 @@ class Settings:
 
     # Trailing
     trail_offset_points: float = 50.0
+    # When True, the bridge skips placing its own IBKR TRAIL orders on entry fills.
+    # Use this when TradingView's Pine strategy.exit trailing stops already drive
+    # position closes via webhook alerts (avoids double-exits).
+    disable_trail: bool = False
 
     # Risk
     max_position_size: int = 1000
@@ -242,6 +246,7 @@ def load_settings() -> Settings:
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         default_qty=_env_int("DEFAULT_QTY", 1),
         trail_offset_points=_env_float("TRAIL_OFFSET_POINTS", 50.0),
+        disable_trail=_env_bool("DISABLE_TRAIL", False),
         max_position_size=_env_int("MAX_POSITION_SIZE", 1000),
         max_open_positions=_env_int("MAX_OPEN_POSITIONS", 10),
         dedup_window_seconds=_env_int("DEDUP_WINDOW_SECONDS", 5),

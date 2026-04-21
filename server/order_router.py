@@ -588,6 +588,13 @@ class OrderRouter:
             )
 
     async def _place_trail_after_entry(self, entry_order: Order, pos: Position, fill_time: datetime) -> None:
+        if settings().disable_trail:
+            log.info(
+                "trail_skipped_disabled",
+                extra={"order_id": entry_order.id, "symbol": entry_order.symbol,
+                       "reason": "DISABLE_TRAIL=true"},
+            )
+            return
         trail_offset = settings().resolve_trail_offset(entry_order.symbol)
         # Warn if trail offset is inappropriate (>= 20% of entry fill price).
         fill_price = entry_order.fill_price or 0.0

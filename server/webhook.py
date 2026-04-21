@@ -12,12 +12,14 @@ from sqlalchemy import select
 
 from .config import settings
 from .database import get_session
-from .models import Signal
+from .models import Position, Signal
 from .schemas import WebhookResponse
 from .signal_parser import (
+    GENERIC_ACTIONS,
     ParsedSignal,
     SignalParseError,
     UnsupportedSignalError,
+    _ACTION_META,
     parse_signal,
 )
 
@@ -106,6 +108,59 @@ async def _push_signal(sig_id: int, parsed_or_none, status_: str, reason: Option
         log.warning("signal_broadcast_failed", extra={"signal_id": sig_id, "error": str(e)})
 
 
+async def _resolve_generic_action(parsed: ParsedSignal) -> Optional[str]:
+    """Resolve generic Pine strategy 'buy'/'sell' actions to concrete directional actions
+    using current DB position state. Mutates `parsed` in place.
+
+    Under one-position-at-a-time semantics:
+      buy  + flat           -> open_long
+      sell + flat           -> open_short
+      sell + long position  -> close_long
+      buy  + short position -> close_short
+      buy  + long position  -> error (would be pyramid/duplicate entry)
+      sell + short position -> error (would be pyramid/duplicate entry)
+
+    Returns a rejection reason string on ambiguous/invalid state, else None.
+    """
+    if parsed.raw_action not in GENERIC_ACTIONS:
+        return None
+
+    async with get_session() as session:
+        stmt = (
+            select(Position)
+            .where(Position.symbol == parsed.symbol)
+            .where(Position.qty > 0)
+            .limit(1)
+        )
+        res = await session.execute(stmt)
+        pos = res.scalar_one_or_none()
+
+    raw = parsed.raw_action
+    if pos is None:
+        resolved = "open_long" if raw == "buy" else "open_short"
+    elif pos.direction == "long":
+        if raw == "sell":
+            resolved = "close_long"
+        else:
+            return f"{raw!r} signal received while long position already open for {parsed.symbol}"
+    else:  # short
+        if raw == "buy":
+            resolved = "close_short"
+        else:
+            return f"{raw!r} signal received while short position already open for {parsed.symbol}"
+
+    side, pos_action, direction = _ACTION_META[resolved]
+    parsed.raw_action = resolved
+    parsed.order_side = side
+    parsed.position_action = pos_action
+    parsed.direction = direction
+    # For resolved closes, align interval with the position's interval so the
+    # downstream (symbol, direction, interval) position lookup matches.
+    if pos_action == "close" and pos is not None and pos.interval:
+        parsed.interval = pos.interval
+    return None
+
+
 def _auth_ok(provided: Optional[str]) -> bool:
     if not provided:
         return False
@@ -165,6 +220,22 @@ async def handle_webhook(
         log.info("webhook_maintenance_block", extra={"raw_action": parsed.raw_action})
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return WebhookResponse(status="maintenance", reason="server in maintenance")
+
+    # --- Resolve generic buy/sell (Pine strategy.order.action) against position state ---
+    if parsed.raw_action in GENERIC_ACTIONS:
+        reject_reason = await _resolve_generic_action(parsed)
+        if reject_reason is not None:
+            sig_id = await _persist_signal(
+                parsed, body, source_ip, status_="rejected", qty=None,
+                reject_reason=reject_reason,
+            )
+            log.warning("generic_action_unresolvable", extra={"signal_id": sig_id, "reason": reject_reason})
+            await _push_signal(sig_id, parsed, "rejected", reason=reject_reason)
+            return WebhookResponse(status="rejected", signal_id=sig_id, reason=reject_reason)
+        log.info(
+            "generic_action_resolved",
+            extra={"symbol": parsed.symbol, "resolved_to": parsed.raw_action, "interval": parsed.interval},
+        )
 
     # --- Resolve qty for open signals ---
     resolved_qty: Optional[int] = None
