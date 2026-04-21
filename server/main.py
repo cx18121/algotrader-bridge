@@ -197,7 +197,14 @@ if os.path.isdir(_DASHBOARD_DIR):
     app.mount("/static", StaticFiles(directory=_DASHBOARD_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
-    async def _index():
+    async def _index(request: Request):
+        from .api import _session_cookie_ok
+        cfg = settings()
+        if cfg.dashboard_auth == "basic_auth":
+            session = request.cookies.get("session")
+            if not _session_cookie_ok(session):
+                from fastapi.responses import RedirectResponse
+                return RedirectResponse("/login", status_code=302)
         index_path = os.path.join(_DASHBOARD_DIR, "index.html")
         if os.path.isfile(index_path):
             return FileResponse(index_path)
