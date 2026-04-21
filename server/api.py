@@ -483,6 +483,28 @@ async def admin_close_position(body: _ClosePositionIn) -> dict:
 
 @router.post("/admin/clear-db", dependencies=[Depends(_auth_guard)])
 async def admin_clear_db() -> dict:
+    from .main import get_state
+    ibkr = get_state().get("ibkr")
+
+    # Close all open positions in IBKR before wiping the DB.
+    closed: list[dict] = []
+    failed: list[dict] = []
+    if ibkr is not None:
+        ibkr_positions = await ibkr.get_positions()
+        for p in ibkr_positions:
+            symbol = p.get("symbol", "")
+            qty = int(p.get("position", 0))
+            if qty == 0 or not symbol:
+                continue
+            action = "SELL" if qty > 0 else "BUY"
+            order_id = await ibkr.place_market(symbol, action, abs(qty))
+            if order_id:
+                closed.append({"symbol": symbol, "qty": qty, "order_id": order_id})
+                log.info("admin_clear_db_closed", extra={"symbol": symbol, "qty": qty})
+            else:
+                failed.append({"symbol": symbol, "qty": qty})
+                log.warning("admin_clear_db_close_failed", extra={"symbol": symbol, "qty": qty})
+
     counts: dict[str, int] = {}
     async with get_session() as session:
         for model, name in [
@@ -494,7 +516,7 @@ async def admin_clear_db() -> dict:
             counts[name] = result.rowcount
         await session.commit()
     log.info("admin_clear_db", extra={"counts": counts})
-    return {"status": "cleared", "counts": counts}
+    return {"status": "cleared", "counts": counts, "positions_closed": closed, "positions_failed": failed}
 
 
 # ---------------- /api/contracts ----------------
