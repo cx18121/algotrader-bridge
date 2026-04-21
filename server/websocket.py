@@ -155,26 +155,25 @@ class ConnectionManager:
 
 # ---------------- Auth ----------------
 
-def _ws_token_ok(token: Optional[str], client_host: Optional[str]) -> tuple[bool, str]:
-    """Return (ok, reason). PRD: token query param. We honor dashboard_auth mode:
-      - none           -> always ok
-      - ip_allowlist   -> client IP must be in DASHBOARD_ALLOWED_IPS
-      - basic_auth     -> token must equal DASHBOARD_PASSWORD (constant-time)
-    """
+def _ws_token_ok(token: Optional[str], client_host: Optional[str], session: Optional[str] = None) -> tuple[bool, str]:
+    """Return (ok, reason). Accepts session cookie (set by /api/login) or legacy token param."""
+    from .api import _session_cookie_ok
     cfg = settings()
     mode = cfg.dashboard_auth
     if mode == "none":
         return True, ""
-    if mode == "ip_allowlist":
-        if client_host and client_host in cfg.dashboard_allowed_ips:
-            return True, ""
-        return False, f"ip {client_host} not in allowlist"
     if mode == "basic_auth":
+        if _session_cookie_ok(session):
+            return True, ""
         expected = (cfg.dashboard_password or "").encode()
         provided = (token or "").encode()
         if expected and secrets.compare_digest(expected, provided):
             return True, ""
         return False, "invalid token"
+    if mode == "ip_allowlist":
+        if client_host and client_host in cfg.dashboard_allowed_ips:
+            return True, ""
+        return False, f"ip {client_host} not in allowlist"
     return False, f"unknown auth mode: {mode}"
 
 
@@ -254,7 +253,8 @@ async def _build_snapshot() -> dict[str, Any]:
 @router.websocket("/ws/feed")
 async def ws_feed(websocket: WebSocket, token: Optional[str] = Query(default=None)) -> None:
     client_host = websocket.client.host if websocket.client else None
-    ok, reason = _ws_token_ok(token, client_host)
+    session = websocket.cookies.get("session")
+    ok, reason = _ws_token_ok(token, client_host, session)
     if not ok:
         log.info("ws_auth_rejected", extra={"reason": reason, "client": client_host})
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)

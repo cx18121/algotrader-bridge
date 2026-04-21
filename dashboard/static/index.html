@@ -429,14 +429,13 @@ function escapeHtml(str) {
     .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
-// ---------- auth + URL ----------
-function getToken() {
-  const h = (location.hash || "").replace(/^#/, "");
-  const params = new URLSearchParams(h);
-  return params.get("token") || "";
-}
+// ---------- auth + fetch ----------
 function apiFetch(path) {
   return fetch(path, { credentials: "same-origin" }).then(r => {
+    if (r.status === 401 || r.status === 403) {
+      window.location.replace("/login");
+      throw new Error("unauthenticated");
+    }
     if (!r.ok) throw new Error("HTTP " + r.status);
     return r.json();
   });
@@ -449,8 +448,7 @@ let wsReconnectTimer = null;
 
 function wsConnect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const token = getToken();
-  const url = `${proto}//${location.host}/ws/feed${token ? "?token=" + encodeURIComponent(token) : ""}`;
+  const url = `${proto}//${location.host}/ws/feed`;
   setWsIndicator(false, "Connecting…");
   try { ws = new WebSocket(url); }
   catch (e) { scheduleReconnect(); return; }
@@ -466,7 +464,8 @@ function wsConnect() {
     handleMessage(msg);
   };
   ws.onerror = () => { /* onclose will follow */ };
-  ws.onclose = () => {
+  ws.onclose = (ev) => {
+    if (ev.code === 1008) { window.location.replace("/login"); return; }
     setWsIndicator(false, "Disconnected");
     showDiscBanner();
     scheduleReconnect();

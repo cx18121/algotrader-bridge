@@ -203,6 +203,13 @@ if os.path.isdir(_DASHBOARD_DIR):
             return FileResponse(index_path)
         return JSONResponse({"error": "dashboard not built"}, status_code=503)
 
+    @app.get("/login", include_in_schema=False)
+    async def _login():
+        login_path = os.path.join(_DASHBOARD_DIR, "login.html")
+        if os.path.isfile(login_path):
+            return FileResponse(login_path)
+        return JSONResponse({"error": "login page not found"}, status_code=503)
+
 
 # Expose app_state to the API module via import-safe accessor.
 def get_state() -> dict:

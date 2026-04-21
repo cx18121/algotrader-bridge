@@ -1,12 +1,14 @@
 """REST API endpoints: status, signals, orders, positions, account, slippage stats."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Query, Request, Response, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, func, select
@@ -32,16 +34,35 @@ router = APIRouter(prefix="/api")
 
 _basic = HTTPBasic(auto_error=False)
 
+SESSION_COOKIE = "session"
+SESSION_MAX_AGE = 7 * 24 * 3600  # 7 days
+
+
+def _compute_session_token() -> str:
+    cfg = settings()
+    key = (cfg.webhook_secret or "").encode()
+    msg = f"{cfg.dashboard_username}:{cfg.dashboard_password}".encode()
+    return hmac.new(key, msg, hashlib.sha256).hexdigest()
+
+
+def _session_cookie_ok(cookie: Optional[str]) -> bool:
+    if not cookie:
+        return False
+    return secrets.compare_digest(_compute_session_token().encode(), cookie.encode())
+
 
 # ---------------- Auth dependency ----------------
 
 async def _auth_guard(
     request: Request,
     creds: Optional[HTTPBasicCredentials] = Depends(_basic),
+    session: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE),
 ) -> None:
     cfg = settings()
     mode = cfg.dashboard_auth
     if mode == "none":
+        return
+    if mode == "basic_auth" and _session_cookie_ok(session):
         return
     if mode == "ip_allowlist":
         client_ip = request.client.host if request.client else None
@@ -77,6 +98,36 @@ async def _auth_guard(
 
 @router.get("/health", include_in_schema=False)
 async def health() -> dict:
+    return {"status": "ok"}
+
+
+# ---------------- /api/login & /api/logout (public) ----------------
+
+class _LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+@router.post("/login", include_in_schema=False)
+async def login(body: _LoginIn, response: Response) -> dict:
+    cfg = settings()
+    if cfg.dashboard_auth != "basic_auth":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="login not available")
+    user_ok = secrets.compare_digest(body.username.encode(), (cfg.dashboard_username or "").encode())
+    pass_ok = secrets.compare_digest(body.password.encode(), (cfg.dashboard_password or "").encode())
+    if not (user_ok and pass_ok):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+    token = _compute_session_token()
+    response.set_cookie(
+        SESSION_COOKIE, token,
+        httponly=True, samesite="lax", max_age=SESSION_MAX_AGE,
+    )
+    return {"status": "ok"}
+
+
+@router.post("/logout", include_in_schema=False)
+async def logout(response: Response) -> dict:
+    response.delete_cookie(SESSION_COOKIE)
     return {"status": "ok"}
 
 
