@@ -18,18 +18,59 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Optional
 
-try:
-    from ib_insync import IB, Contract, MarketOrder, Order, Stock, Trade, util  # type: ignore
-    _IB_AVAILABLE = True
-except Exception as _e:  # pragma: no cover — optional
-    IB = object  # type: ignore
-    Contract = object  # type: ignore
-    MarketOrder = object  # type: ignore
-    Order = object  # type: ignore
-    Stock = object  # type: ignore
-    Trade = object  # type: ignore
-    util = None
-    _IB_AVAILABLE = False
+# ib_insync / eventkit cache the "main event loop" at import time. On Python 3.14
+# asyncio.get_event_loop() raises when no loop exists, AND if we pre-create a loop
+# just to satisfy the import, ib_insync's sockets/Events get bound to *that* loop
+# instead of uvicorn's running loop ("attached to a different loop" errors).
+#
+# Fix: defer the ib_insync import to start() where the running uvicorn loop is
+# already the current loop. The names below are placeholders until then.
+IB = object  # type: ignore
+Contract = object  # type: ignore
+MarketOrder = object  # type: ignore
+Order = object  # type: ignore
+Stock = object  # type: ignore
+Trade = object  # type: ignore
+util = None
+_IB_AVAILABLE = False
+_IB_IMPORT_ERROR: Optional[str] = None
+
+
+def _lazy_import_ib_insync() -> bool:
+    """Import ib_insync from inside a running event loop. Returns True on success."""
+    global IB, Contract, MarketOrder, Order, Stock, Trade, util, _IB_AVAILABLE, _IB_IMPORT_ERROR
+    if _IB_AVAILABLE:
+        return True
+    # Ensure the current running loop is also the policy's "current event loop".
+    # In Python 3.14, asyncio.set_event_loop with a running loop is required for
+    # eventkit's get_event_loop_policy().get_event_loop() to find it at import time.
+    try:
+        running = asyncio.get_running_loop()
+        asyncio.set_event_loop(running)
+    except RuntimeError:
+        pass
+    try:
+        from ib_insync import (  # type: ignore
+            IB as _IB,
+            Contract as _Contract,
+            MarketOrder as _MarketOrder,
+            Order as _Order,
+            Stock as _Stock,
+            Trade as _Trade,
+            util as _util,
+        )
+        IB = _IB
+        Contract = _Contract
+        MarketOrder = _MarketOrder
+        Order = _Order
+        Stock = _Stock
+        Trade = _Trade
+        util = _util
+        _IB_AVAILABLE = True
+        return True
+    except Exception as e:  # pragma: no cover
+        _IB_IMPORT_ERROR = f"{type(e).__name__}: {e}"
+        return False
 
 from .config import settings
 
@@ -48,7 +89,9 @@ class IBKRClient:
         on_fill: Optional[FillCallback] = None,
         on_status: Optional[StatusCallback] = None,
     ) -> None:
-        self.ib = IB() if _IB_AVAILABLE else None
+        # Instantiate IB() lazily inside start() so the socket binds to the
+        # running event loop (uvicorn's), not whichever loop exists at import time.
+        self.ib = None
         self.on_fill = on_fill
         self.on_status = on_status
         self._connected: bool = False
@@ -77,9 +120,16 @@ class IBKRClient:
 
     async def start(self) -> None:
         """Start connection attempts in the background."""
-        if self.ib is None:
-            log.warning("ib_insync_unavailable_running_in_mock_mode")
+        # Import ib_insync now, from inside the running uvicorn loop, so
+        # eventkit's import-time get_event_loop() call binds to the right loop.
+        if not _lazy_import_ib_insync():
+            log.warning(
+                "ib_insync_unavailable_running_in_mock_mode",
+                extra={"import_error": _IB_IMPORT_ERROR},
+            )
             return
+        if self.ib is None:
+            self.ib = IB()
         self._stop_reconnect.clear()
         self._reconnect_task = asyncio.create_task(self._reconnect_loop())
 
