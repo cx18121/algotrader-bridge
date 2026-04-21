@@ -1,0 +1,918 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AlgoTrader Bridge</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #111821;
+    --panel-alt: #151d27;
+    --border: #1f2a37;
+    --text: #d9e1ec;
+    --muted: #7b8797;
+    --accent: #4aa3ff;
+    --green: #3ecf8e;
+    --red: #ef5b5b;
+    --amber: #f2b147;
+    --blue: #4aa3ff;
+    --gray: #8a93a0;
+    --orange: #f08a3c;
+    --yellow: #d8c03b;
+    --maint-bg: #3a2414;
+    --maint-border: #a26131;
+    --disc-bg: #3a1818;
+    --disc-border: #a23131;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  body { padding: 12px; min-width: 980px; }
+  h1, h2, h3 { margin: 0; font-weight: 600; }
+  h1 { font-size: 16px; color: var(--accent); letter-spacing: .3px; }
+  h2 { font-size: 13px; text-transform: uppercase; color: var(--muted); letter-spacing: .08em; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
+  .panel > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; gap: 12px; }
+  .panel .count-badge { background: var(--border); color: var(--text); border-radius: 10px; padding: 1px 8px; font-size: 11px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; background: var(--border); color: var(--text); }
+  .pill.green { background: rgba(62, 207, 142, .18); color: var(--green); }
+  .pill.red { background: rgba(239, 91, 91, .18); color: var(--red); }
+  .pill.gray { background: rgba(138, 147, 160, .18); color: var(--gray); }
+  .pill.blue { background: rgba(74, 163, 255, .18); color: var(--blue); }
+  .pill.yellow { background: rgba(216, 192, 59, .18); color: var(--yellow); }
+  .pill.orange { background: rgba(240, 138, 60, .18); color: var(--orange); }
+  .pill.amber { background: rgba(242, 177, 71, .18); color: var(--amber); }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; background: var(--panel-alt); position: sticky; top: 0; }
+  tr.flash td { background: rgba(74, 163, 255, .08); transition: background 1200ms ease-out; }
+  tbody tr:hover td { background: var(--panel-alt); }
+  .empty { color: var(--muted); font-style: italic; padding: 12px; text-align: center; }
+
+  .statusbar { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; }
+  .statusbar .cell { background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  .statusbar .cell .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  .statusbar .cell .value { font-size: 15px; font-weight: 600; margin-top: 2px; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .dot.green { background: var(--green); box-shadow: 0 0 8px rgba(62,207,142,.6); }
+  .dot.red { background: var(--red); box-shadow: 0 0 8px rgba(239,91,91,.6); }
+  .dot.amber { background: var(--amber); box-shadow: 0 0 8px rgba(242,177,71,.6); }
+  .dot.gray { background: var(--gray); }
+
+  .account-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .account-grid .cell { background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+  .account-grid .label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+  .account-grid .value { font-size: 18px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .filters label { color: var(--muted); font-size: 11px; }
+  .filters input, .filters select, button {
+    background: var(--panel-alt); color: var(--text); border: 1px solid var(--border);
+    border-radius: 4px; padding: 4px 8px; font-size: 12px;
+  }
+  .filters input:focus, .filters select:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+  button { cursor: pointer; }
+  button:hover { background: var(--border); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.primary:hover { background: #3b8ae0; }
+
+  .banner { border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; font-weight: 600; }
+  .banner.maint { background: var(--maint-bg); border: 1px solid var(--maint-border); color: var(--amber); }
+  .banner.disc { background: var(--disc-bg); border: 1px solid var(--disc-border); color: var(--red); }
+  .banner .sub { font-weight: 400; color: var(--text); margin-left: 8px; }
+
+  .toast-stack { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 9999; max-width: 420px; }
+  .toast { background: var(--panel); border: 1px solid var(--red); border-left-width: 4px; border-radius: 4px; padding: 8px 30px 8px 12px; position: relative; }
+  .toast .close { position: absolute; top: 4px; right: 8px; background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; }
+
+  .stale { opacity: 0.55; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 2fr; gap: 12px; }
+  .panels-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 1280px) { .panels-grid, .two-col { grid-template-columns: 1fr; } }
+
+  .scroll-x { overflow-x: auto; }
+  .slippage-global { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 10px; }
+  .slippage-global .cell { background: var(--panel-alt); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; }
+  .slippage-global .label { color: var(--muted); font-size: 10px; text-transform: uppercase; }
+  .slippage-global .value { font-size: 15px; font-weight: 600; }
+
+  .warning-row { display: grid; grid-template-columns: 150px 70px 90px 140px 1fr auto; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--border); align-items: center; }
+  .warning-row:last-child { border-bottom: none; }
+  .warning-row .time { color: var(--muted); font-size: 11px; }
+
+  .small { font-size: 11px; color: var(--muted); }
+  .tag { display: inline-block; padding: 0 6px; border-radius: 3px; background: var(--border); color: var(--muted); font-size: 10px; margin-right: 4px; }
+
+  .accepting-off { background: rgba(239, 91, 91, .18); color: var(--red); padding: 2px 8px; border-radius: 4px; }
+  .accepting-on  { color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px;">
+  <h1>AlgoTrader Bridge</h1>
+  <div class="small">
+    <span id="ws-indicator"><span class="dot gray"></span>Connecting…</span>
+    <span id="accepting" class="accepting-on" style="margin-left:10px;"></span>
+    <span id="last-event" style="margin-left:10px;"></span>
+  </div>
+</header>
+
+<div id="banners"></div>
+
+<!-- Panel 1: Status bar -->
+<section class="panel">
+  <header><h2>Status</h2></header>
+  <div class="statusbar">
+    <div class="cell"><div class="label">TWS</div><div class="value" id="s-tws"><span class="dot gray"></span>—</div><div class="small" id="s-tws-detail">—</div></div>
+    <div class="cell"><div class="label">Uptime</div><div class="value" id="s-uptime">—</div></div>
+    <div class="cell"><div class="label">Signals (UTC today)</div><div class="value" id="s-signals">—</div></div>
+    <div class="cell"><div class="label">Orders (UTC today)</div><div class="value" id="s-orders">—</div></div>
+    <div class="cell"><div class="label">Open Positions</div><div class="value" id="s-positions">—</div></div>
+    <div class="cell"><div class="label">Active Intervals</div><div class="value" id="s-intervals">—</div></div>
+    <div class="cell"><div class="label">Accepting Signals</div><div class="value" id="s-accepting">—</div></div>
+    <div class="cell"><div class="label">Maintenance</div><div class="value" id="s-maint">—</div></div>
+  </div>
+</section>
+
+<!-- Panel 2 + Panel 3 -->
+<div class="two-col">
+  <!-- Panel 2: Account Summary -->
+  <section class="panel">
+    <header><h2>Account</h2><span class="small" id="acct-ts">—</span></header>
+    <div class="account-grid">
+      <div class="cell"><div class="label">Net Liquidation</div><div class="value" id="a-net">—</div></div>
+      <div class="cell"><div class="label">Total Cash</div><div class="value" id="a-cash">—</div></div>
+      <div class="cell"><div class="label">Unrealized P&amp;L</div><div class="value" id="a-upl">—</div></div>
+      <div class="cell"><div class="label">Realized P&amp;L</div><div class="value" id="a-rpl">—</div></div>
+    </div>
+  </section>
+
+  <!-- Panel 3: Open Positions -->
+  <section class="panel">
+    <header>
+      <h2>Open Positions <span class="count-badge" id="pos-count">0</span></h2>
+      <div class="filters">
+        <label>Symbol <input id="pos-f-symbol" placeholder="all" size="6" /></label>
+        <label>Interval
+          <select id="pos-f-interval"><option value="">all</option></select>
+        </label>
+      </div>
+    </header>
+    <div class="scroll-x">
+    <table id="pos-table">
+      <thead><tr>
+        <th>Symbol</th><th>Interval</th><th>Dir</th><th>Qty</th><th>Avg Cost</th><th>Mkt Price</th>
+        <th>Mkt Value</th><th>UPL</th><th>%</th><th>Trail Stop</th><th>Trail Offset</th><th>Opened</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </section>
+</div>
+
+<!-- Panel 4 + Panel 5 -->
+<div class="panels-grid">
+  <!-- Panel 4: Signal Log -->
+  <section class="panel">
+    <header>
+      <h2>Signal Log <span class="count-badge" id="sig-count">0</span></h2>
+      <div class="filters">
+        <input id="sig-f-symbol" placeholder="Symbol" size="6" />
+        <select id="sig-f-interval"><option value="">All intervals</option></select>
+        <select id="sig-f-action">
+          <option value="">All actions</option>
+          <option>open_long</option><option>close_long</option>
+          <option>open_short</option><option>close_short</option>
+          <option>orphan_trail_fill</option>
+        </select>
+        <select id="sig-f-status">
+          <option value="">All statuses</option>
+          <option>accepted</option><option>rejected</option>
+          <option>deduped</option><option>informational</option><option>unsupported</option>
+        </select>
+        <select id="sig-f-format">
+          <option value="">All formats</option>
+          <option>json</option><option>plaintext</option>
+        </select>
+      </div>
+    </header>
+    <div class="scroll-x">
+    <table id="sig-table">
+      <thead><tr>
+        <th>Time</th><th>Symbol</th><th>Interval</th><th>Action</th><th>Dir</th><th>Qty</th>
+        <th>Close</th><th>Strategy</th><th>Format</th><th>Status</th><th>Reason</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- Panel 5: Order History -->
+  <section class="panel">
+    <header>
+      <h2>Order History <span class="count-badge" id="ord-count">0</span></h2>
+      <div class="filters">
+        <input id="ord-f-symbol" placeholder="Symbol" size="6" />
+        <select id="ord-f-interval"><option value="">All intervals</option></select>
+        <select id="ord-f-role">
+          <option value="">All roles</option>
+          <option>entry</option><option>exit</option><option>trail_stop</option>
+        </select>
+        <select id="ord-f-type">
+          <option value="">All types</option>
+          <option>MKT</option><option>TRAIL</option>
+        </select>
+        <select id="ord-f-status">
+          <option value="">All statuses</option>
+          <option>submitted</option><option>working</option><option>filled</option>
+          <option>partial</option><option>cancelled</option><option>error</option>
+          <option>rejected</option>
+        </select>
+      </div>
+    </header>
+    <div class="scroll-x">
+    <table id="ord-table">
+      <thead><tr>
+        <th>Time</th><th>Symbol</th><th>Interval</th><th>Action</th><th>Qty</th>
+        <th>Type</th><th>Role</th><th>Status</th><th>Signal Px</th><th>Fill Px</th>
+        <th>Slip (pts)</th><th>Fill Qty</th><th>Fill Time</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+  </section>
+</div>
+
+<!-- Panel 6 + Panel 7 -->
+<div class="panels-grid">
+  <!-- Panel 6: Slippage -->
+  <section class="panel">
+    <header>
+      <h2>Slippage Statistics</h2>
+      <div class="filters">
+        <input id="sl-f-symbol" placeholder="Symbol" size="6" />
+        <select id="sl-f-interval"><option value="">All intervals</option></select>
+        <input id="sl-f-from" type="datetime-local" />
+        <input id="sl-f-to" type="datetime-local" />
+        <button class="primary" onclick="loadSlippage()">Refresh</button>
+      </div>
+    </header>
+    <div class="slippage-global">
+      <div class="cell"><div class="label">Total Fills</div><div class="value" id="sl-total">—</div></div>
+      <div class="cell"><div class="label">Avg Slip (pts)</div><div class="value" id="sl-avg-pts">—</div></div>
+      <div class="cell"><div class="label">Avg Slip (%)</div><div class="value" id="sl-avg-pct">—</div></div>
+      <div class="cell"><div class="label">Max Slip (pts)</div><div class="value" id="sl-max">—</div></div>
+      <div class="cell"><div class="label">Min Slip (pts)</div><div class="value" id="sl-min">—</div></div>
+    </div>
+    <div class="scroll-x">
+    <table id="sl-table">
+      <thead><tr>
+        <th>Interval</th><th>Fills</th><th>Avg Slip (pts)</th><th>Avg Slip (%)</th>
+        <th>Max (pts)</th><th>Min (pts)</th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    </div>
+    <div class="small" style="margin-top:6px;">Not streamed — pulled on demand.</div>
+  </section>
+
+  <!-- Panel 7: Warnings -->
+  <section class="panel">
+    <header>
+      <h2>Warnings <span class="count-badge" id="warn-count">0</span></h2>
+      <div class="filters"><button onclick="clearWarnings()">Dismiss all</button></div>
+    </header>
+    <div id="warn-list"></div>
+    <div class="empty" id="warn-empty">No warnings.</div>
+  </section>
+</div>
+
+<div id="toast-stack" class="toast-stack"></div>
+
+<script>
+"use strict";
+
+// ---------- state ----------
+const state = {
+  signals: [],        // array of SignalOut
+  orders: [],         // array of OrderOut
+  positions: [],      // array of PositionOut (with trail fields)
+  account: null,      // AccountOut or null
+  tws: { connected: false, reason: null },
+  maintenance: { mode: "normal", message: "", resumes_at: null },
+  accepting: true,
+  warnings: [],       // local, not persisted
+  stale: false,       // tws disconnected
+  startTime: null,    // approximated from first snapshot
+  uptimeSeconds: 0,
+};
+
+const intervalsSeen = new Set();
+const seenInitialSignalsToday = { set: null, ts: null }; // for uptime derivation
+
+// ---------- helpers ----------
+const qs = (s) => document.querySelector(s);
+const qsa = (s) => document.querySelectorAll(s);
+const fmtUsd = (v) => (v == null || isNaN(v)) ? "—" :
+  (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtNum = (v, d = 2) => (v == null || isNaN(v)) ? "—" : Number(v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtInt = (v) => (v == null || isNaN(v)) ? "—" : Number(v).toLocaleString();
+const fmtPct = (v) => (v == null || isNaN(v)) ? "—" : Number(v).toFixed(2) + "%";
+const fmtTime = (iso) => {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleTimeString([], { hour12: false }); }
+  catch { return iso; }
+};
+const fmtDateTime = (iso) => {
+  if (!iso) return "—";
+  try { const d = new Date(iso); return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour12: false }); }
+  catch { return iso; }
+};
+const fmtSec = (s) => {
+  if (s == null) return "—";
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+};
+const signalStatusColor = (s) => ({
+  accepted: "green", rejected: "red", deduped: "gray",
+  informational: "blue", unsupported: "yellow",
+}[s] || "gray");
+const roleColor = (r) => ({ entry: "green", exit: "gray", trail_stop: "orange" }[r] || "gray");
+const orderStatusColor = (s) => ({
+  filled: "green", working: "blue", submitted: "blue", partial: "amber",
+  cancelled: "gray", error: "red", rejected: "red",
+}[s] || "gray");
+
+function escapeHtml(str) {
+  if (str == null) return "";
+  return String(str)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+}
+
+// ---------- auth + URL ----------
+function getToken() {
+  const h = (location.hash || "").replace(/^#/, "");
+  const params = new URLSearchParams(h);
+  return params.get("token") || "";
+}
+function apiFetch(path) {
+  return fetch(path, { credentials: "same-origin" }).then(r => {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  });
+}
+
+// ---------- WebSocket ----------
+let ws = null;
+let wsRetryMs = 1000;
+let wsReconnectTimer = null;
+
+function wsConnect() {
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const token = getToken();
+  const url = `${proto}//${location.host}/ws/feed${token ? "?token=" + encodeURIComponent(token) : ""}`;
+  setWsIndicator(false, "Connecting…");
+  try { ws = new WebSocket(url); }
+  catch (e) { scheduleReconnect(); return; }
+
+  ws.onopen = () => {
+    wsRetryMs = 1000;
+    setWsIndicator(true, "Live");
+    removeBanner("ws-disc");
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    handleMessage(msg);
+  };
+  ws.onerror = () => { /* onclose will follow */ };
+  ws.onclose = () => {
+    setWsIndicator(false, "Disconnected");
+    showDiscBanner();
+    scheduleReconnect();
+  };
+}
+
+function scheduleReconnect() {
+  if (wsReconnectTimer) return;
+  const delay = wsRetryMs;
+  wsRetryMs = Math.min(wsRetryMs * 2, 15000);
+  wsReconnectTimer = setTimeout(() => { wsReconnectTimer = null; wsConnect(); }, delay);
+}
+
+function setWsIndicator(ok, label) {
+  qs("#ws-indicator").innerHTML =
+    `<span class="dot ${ok ? "green" : "red"}"></span>${escapeHtml(label)}`;
+  qs("#last-event").textContent = ok ? "" : "—";
+}
+
+function showDiscBanner() {
+  setBanner("ws-disc", "disc", "Live feed disconnected — reconnecting…", "");
+}
+
+// ---------- banners ----------
+function setBanner(id, kind, text, sub) {
+  const parent = qs("#banners");
+  let el = document.getElementById("banner-" + id);
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "banner-" + id;
+    el.className = "banner " + kind;
+    parent.appendChild(el);
+  }
+  el.className = "banner " + kind;
+  el.innerHTML = `<span>${escapeHtml(text)}</span><span class="sub">${escapeHtml(sub || "")}</span>`;
+}
+function removeBanner(id) {
+  const el = document.getElementById("banner-" + id);
+  if (el) el.remove();
+}
+
+// ---------- message handler ----------
+function handleMessage(msg) {
+  if (!msg || !msg.type) return;
+  qs("#last-event").textContent = msg.type + " @ " + fmtTime(msg.ts);
+  switch (msg.type) {
+    case "snapshot":          applySnapshot(msg.data); break;
+    case "signal":            onSignalEvent(msg.data); break;
+    case "order_update":      onOrderEvent(msg.data); break;
+    case "fill":              onOrderEvent(msg.data); break;
+    case "order_replaced":    onOrderEvent(msg.data); break;
+    case "position_update":   onPositionEvent(msg.data); break;
+    case "account_update":    onAccountUpdate(msg.data); break;
+    case "tws_status":        onTwsStatus(msg.data); break;
+    case "maintenance_status":onMaintenanceStatus(msg.data, msg.ts); break;
+    case "maintenance_close_failed": onMaintenanceCloseFailed(msg.data, msg.ts); break;
+    case "orphan_trail_warning":     onOrphanTrail(msg.data, msg.ts); break;
+    case "heartbeat":         /* no-op */ break;
+    case "pong":              /* no-op */ break;
+    default: break;
+  }
+}
+
+// ---------- snapshot ----------
+function applySnapshot(d) {
+  state.signals = Array.isArray(d.signals) ? d.signals.slice(0, 100) : [];
+  state.orders = Array.isArray(d.orders) ? d.orders.slice(0, 100) : [];
+  state.positions = Array.isArray(d.positions) ? d.positions : [];
+  state.account = d.account || null;
+  state.tws = d.tws_status || state.tws;
+  state.maintenance = d.maintenance_status || state.maintenance;
+  state.accepting = !!d.accepting_signals;
+  state.stale = !state.tws.connected;
+
+  state.signals.forEach(s => { if (s.interval) intervalsSeen.add(s.interval); });
+  state.positions.forEach(p => { if (p.interval) intervalsSeen.add(p.interval); });
+  refreshIntervalOptions();
+
+  renderAll();
+}
+
+// ---------- streamed event handlers (debounced refetch where needed) ----------
+let sigTimer = null, ordTimer = null, posTimer = null;
+function scheduleRefresh(kind) {
+  if (kind === "signals" && !sigTimer) {
+    sigTimer = setTimeout(async () => {
+      sigTimer = null;
+      try {
+        const rows = await apiFetch("/api/signals?limit=100");
+        state.signals = rows;
+        rows.forEach(s => { if (s.interval) intervalsSeen.add(s.interval); });
+        refreshIntervalOptions();
+        renderSignals();
+      } catch (e) { /* stay quiet; ws still works */ }
+    }, 150);
+  } else if (kind === "orders" && !ordTimer) {
+    ordTimer = setTimeout(async () => {
+      ordTimer = null;
+      try {
+        const rows = await apiFetch("/api/orders?limit=100");
+        state.orders = rows;
+        rows.forEach(o => { if (o.interval) intervalsSeen.add(o.interval); });
+        refreshIntervalOptions();
+        renderOrders();
+      } catch (e) { /* quiet */ }
+    }, 150);
+  } else if (kind === "positions" && !posTimer) {
+    posTimer = setTimeout(async () => {
+      posTimer = null;
+      try {
+        const rows = await apiFetch("/api/positions?active_only=true");
+        state.positions = rows;
+        rows.forEach(p => { if (p.interval) intervalsSeen.add(p.interval); });
+        refreshIntervalOptions();
+        renderPositions();
+        renderStatusBar();
+      } catch (e) { /* quiet */ }
+    }, 150);
+  }
+}
+
+function onSignalEvent(d) {
+  if (d && d.interval) intervalsSeen.add(d.interval);
+  scheduleRefresh("signals");
+}
+function onOrderEvent(d) {
+  if (d && d.status === "error" && d.error_msg) {
+    addToast(`Order error for ${d.symbol || "?"}${d.interval ? " (" + d.interval + ")" : ""}: ${d.error_msg}`);
+  }
+  scheduleRefresh("orders");
+  // A fill or position-changing event may also move positions.
+  scheduleRefresh("positions");
+}
+function onPositionEvent(d) {
+  if (d && d.interval) intervalsSeen.add(d.interval);
+  scheduleRefresh("positions");
+}
+function onAccountUpdate(d) {
+  if (!d) return;
+  state.account = {
+    net_liquidation: d.net_liquidation ?? null,
+    total_cash: d.total_cash ?? null,
+    unrealized_pnl: d.unrealized_pnl ?? null,
+    realized_pnl: d.realized_pnl ?? null,
+    equity_with_loan: d.equity_with_loan ?? null,
+    snapshot_time: new Date().toISOString(),
+  };
+  renderAccount();
+}
+function onTwsStatus(d) {
+  state.tws = { connected: !!d.connected, reason: d.reason || null };
+  state.stale = !state.tws.connected;
+  renderStatusBar();
+  renderPositions();
+  renderAccount();
+}
+function onMaintenanceStatus(d, ts) {
+  state.maintenance = {
+    mode: d.mode || "normal",
+    message: d.message || "",
+    resumes_at: d.resumes_at || null,
+  };
+  // Pre-close and maintenance mean not accepting signals.
+  if (state.maintenance.mode !== "normal") state.accepting = false;
+  else state.accepting = true;
+  renderStatusBar();
+  renderMaintenanceBanner();
+}
+function onMaintenanceCloseFailed(d, ts) {
+  pushWarning({
+    ts: ts || new Date().toISOString(),
+    type: "maintenance_close_failed",
+    symbol: (d.positions || []).map(p => p.symbol).join(", ") || "—",
+    interval: "—",
+    description: `Maintenance close failed for ${(d.positions || []).length} position(s).`,
+    raw: d,
+  });
+  addToast("Maintenance close failed — positions still open. Check TWS.");
+}
+function onOrphanTrail(d, ts) {
+  pushWarning({
+    ts: ts || new Date().toISOString(),
+    type: "orphan_trail",
+    symbol: d.symbol || "—",
+    interval: d.interval || "—",
+    description: `Trailing stop fill for unknown ibkr_order_id=${d.ibkr_order_id}. Position closed.`,
+    raw: d,
+  });
+}
+
+// ---------- render: banners ----------
+function renderMaintenanceBanner() {
+  if (state.maintenance.mode === "normal") {
+    removeBanner("maint");
+    return;
+  }
+  const mode = state.maintenance.mode;
+  const resumes = state.maintenance.resumes_at ? fmtDateTime(state.maintenance.resumes_at) : "unknown";
+  const label = mode === "pre_close" ? "PRE-CLOSE — closing open positions" : "MAINTENANCE MODE";
+  const sub = (state.maintenance.message || "") + (state.maintenance.resumes_at ? `  Resumes at ${resumes}` : "");
+  setBanner("maint", "maint", label, sub);
+}
+
+// ---------- render: status bar ----------
+function renderStatusBar() {
+  // TWS
+  const twsDot = state.tws.connected ? "green" : "red";
+  qs("#s-tws").innerHTML = `<span class="dot ${twsDot}"></span>${state.tws.connected ? "Connected" : "Disconnected"}`;
+  qs("#s-tws-detail").textContent = state.tws.connected
+    ? ""
+    : (state.tws.reason ? "Reason: " + state.tws.reason : "No reason given");
+
+  // Uptime — we approximate by asking /api/status lazily on load and re-rendering here.
+  qs("#s-uptime").textContent = fmtSec(state.uptimeSeconds);
+
+  // Counts
+  qs("#s-signals").textContent = fmtInt(todayCount(state.signals, "received_at"));
+  qs("#s-orders").textContent = fmtInt(todayCount(state.orders, "created_at"));
+  qs("#s-positions").textContent = fmtInt(state.positions.length);
+
+  // Active intervals
+  const ivls = Array.from(intervalsSeen).sort();
+  qs("#s-intervals").innerHTML = ivls.length
+    ? ivls.map(i => `<span class="tag">${escapeHtml(i)} <span style="color:var(--green)">●</span></span>`).join("")
+    : "—";
+
+  // Accepting signals
+  const acceptingEl = qs("#s-accepting");
+  acceptingEl.innerHTML = state.accepting
+    ? `<span class="dot green"></span>Yes`
+    : `<span class="dot red"></span>No`;
+  const pillEl = qs("#accepting");
+  pillEl.className = state.accepting ? "accepting-on" : "accepting-off";
+  pillEl.textContent = state.accepting ? "" : "signals paused";
+
+  // Maintenance
+  const m = state.maintenance;
+  if (m.mode === "normal") qs("#s-maint").innerHTML = `<span class="dot green"></span>Normal`;
+  else if (m.mode === "pre_close") qs("#s-maint").innerHTML = `<span class="dot amber"></span>Pre-close`;
+  else qs("#s-maint").innerHTML = `<span class="dot amber"></span>Maintenance`;
+}
+function todayCount(arr, key) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  return arr.filter(r => {
+    const t = r[key] ? new Date(r[key]).getTime() : 0;
+    return t >= start;
+  }).length;
+}
+
+// ---------- render: account ----------
+function renderAccount() {
+  const a = state.account;
+  qs("#acct-ts").textContent = a && a.snapshot_time ? "as of " + fmtTime(a.snapshot_time) : "no snapshot";
+  const set = (id, v, signed) => {
+    const el = qs(id);
+    if (v == null) { el.textContent = "—"; el.className = "value"; return; }
+    el.textContent = fmtUsd(v);
+    el.className = "value" + (signed && v > 0 ? " pos" : signed && v < 0 ? " neg" : "");
+  };
+  set("#a-net", a ? a.net_liquidation : null, false);
+  set("#a-cash", a ? a.total_cash : null, false);
+  set("#a-upl", a ? a.unrealized_pnl : null, true);
+  set("#a-rpl", a ? a.realized_pnl : null, true);
+  qs("#a-net").parentElement.parentElement.classList.toggle("stale", state.stale);
+}
+
+// ---------- render: positions ----------
+function renderPositions() {
+  const tbody = qs("#pos-table tbody");
+  const sym = qs("#pos-f-symbol").value.trim().toUpperCase();
+  const ivl = qs("#pos-f-interval").value;
+  const rows = state.positions.filter(p =>
+    (!sym || (p.symbol || "").toUpperCase().includes(sym)) &&
+    (!ivl || p.interval === ivl)
+  );
+  qs("#pos-count").textContent = rows.length;
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="12" class="empty">No open positions.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(p => {
+    const pct = (p.avg_cost && p.qty && p.unrealized_pnl != null)
+      ? (p.unrealized_pnl / (p.avg_cost * Math.abs(p.qty))) * 100
+      : null;
+    const uplCls = p.unrealized_pnl == null ? "" : (p.unrealized_pnl >= 0 ? "pos" : "neg");
+    const dirPill = `<span class="pill ${p.direction === "long" ? "green" : "red"}">${escapeHtml((p.direction || "").toUpperCase())}</span>`;
+    return `<tr class="${state.stale ? "stale" : ""}">
+      <td><b>${escapeHtml(p.symbol)}</b></td>
+      <td>${escapeHtml(p.interval || "—")}</td>
+      <td>${dirPill}</td>
+      <td>${fmtInt(p.qty)}</td>
+      <td>${fmtUsd(p.avg_cost)}</td>
+      <td>${fmtUsd(p.market_price)}</td>
+      <td>${fmtUsd(p.market_value)}</td>
+      <td class="${uplCls}">${fmtUsd(p.unrealized_pnl)}</td>
+      <td class="${uplCls}">${fmtPct(pct)}</td>
+      <td>${p.trail_stop_price != null ? fmtUsd(p.trail_stop_price) : "—"}</td>
+      <td>${p.trail_amount != null ? fmtNum(p.trail_amount, 2) : "—"}</td>
+      <td>${fmtDateTime(p.opened_at)}</td>
+    </tr>`;
+  }).join("");
+}
+
+// ---------- render: signals ----------
+function renderSignals() {
+  const tbody = qs("#sig-table tbody");
+  const sym = qs("#sig-f-symbol").value.trim().toUpperCase();
+  const ivl = qs("#sig-f-interval").value;
+  const act = qs("#sig-f-action").value;
+  const st  = qs("#sig-f-status").value;
+  const fmt = qs("#sig-f-format").value;
+  const rows = state.signals.filter(s =>
+    (!sym || (s.symbol || "").toUpperCase().includes(sym)) &&
+    (!ivl || s.interval === ivl) &&
+    (!act || s.raw_action === act) &&
+    (!st  || s.status === st) &&
+    (!fmt || s.parse_format === fmt)
+  ).slice(0, 100);
+  qs("#sig-count").textContent = rows.length;
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="11" class="empty">No signals.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(s => `<tr>
+    <td>${fmtDateTime(s.received_at)}</td>
+    <td><b>${escapeHtml(s.symbol || "—")}</b></td>
+    <td>${escapeHtml(s.interval || "—")}</td>
+    <td>${escapeHtml(s.raw_action || "—")}</td>
+    <td>${s.direction ? `<span class="pill ${s.direction === "long" ? "green" : "red"}">${escapeHtml(s.direction.toUpperCase())}</span>` : "—"}</td>
+    <td>${fmtInt(s.qty)}</td>
+    <td>${fmtUsd(s.close_price)}</td>
+    <td>${escapeHtml(s.strategy || "—")}</td>
+    <td>${escapeHtml(s.parse_format || "—")}</td>
+    <td><span class="pill ${signalStatusColor(s.status)}">${escapeHtml(s.status)}</span></td>
+    <td>${escapeHtml(s.reject_reason || "")}</td>
+  </tr>`).join("");
+}
+
+// ---------- render: orders ----------
+function renderOrders() {
+  const tbody = qs("#ord-table tbody");
+  const sym = qs("#ord-f-symbol").value.trim().toUpperCase();
+  const ivl = qs("#ord-f-interval").value;
+  const role = qs("#ord-f-role").value;
+  const typ = qs("#ord-f-type").value;
+  const st  = qs("#ord-f-status").value;
+  const rows = state.orders.filter(o =>
+    (!sym || (o.symbol || "").toUpperCase().includes(sym)) &&
+    (!ivl || o.interval === ivl) &&
+    (!role || o.order_role === role) &&
+    (!typ || o.order_type === typ) &&
+    (!st || o.status === st)
+  ).slice(0, 100);
+  qs("#ord-count").textContent = rows.length;
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="13" class="empty">No orders.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(o => {
+    const action = `${o.action || ""}${o.direction ? " " + o.direction.toUpperCase() : ""}`.trim();
+    const slip = (o.order_role === "entry" && o.fill_deviation_pts != null)
+      ? fmtNum(o.fill_deviation_pts, 2) + (o.fill_deviation_pct != null ? ` (${fmtNum(o.fill_deviation_pct, 2)}%)` : "")
+      : "—";
+    const replacedNote = o.replaced_by_signal_id
+      ? ` <span class="small">→ replaced</span>`
+      : "";
+    return `<tr>
+      <td>${fmtDateTime(o.created_at)}</td>
+      <td><b>${escapeHtml(o.symbol)}</b></td>
+      <td>${escapeHtml(o.interval || "—")}</td>
+      <td>${escapeHtml(action || "—")}${replacedNote}</td>
+      <td>${fmtInt(o.qty)}</td>
+      <td>${escapeHtml(o.order_type || "—")}</td>
+      <td><span class="pill ${roleColor(o.order_role)}">${escapeHtml(o.order_role || "—")}</span></td>
+      <td><span class="pill ${orderStatusColor(o.status)}">${escapeHtml(o.status)}</span></td>
+      <td>${o.signal_close_price != null ? fmtUsd(o.signal_close_price) : "—"}</td>
+      <td>${o.fill_price != null ? fmtUsd(o.fill_price) : "—"}</td>
+      <td>${slip}</td>
+      <td>${fmtInt(o.fill_qty)}</td>
+      <td>${fmtDateTime(o.fill_time)}</td>
+    </tr>`;
+  }).join("");
+}
+
+// ---------- render: interval filters ----------
+function refreshIntervalOptions() {
+  const ivls = Array.from(intervalsSeen).sort();
+  for (const sel of ["#pos-f-interval", "#sig-f-interval", "#ord-f-interval", "#sl-f-interval"]) {
+    const el = qs(sel);
+    const current = el.value;
+    el.innerHTML = `<option value="">${sel === "#pos-f-interval" ? "all" : "All intervals"}</option>` +
+      ivls.map(i => `<option${i === current ? " selected" : ""}>${escapeHtml(i)}</option>`).join("");
+  }
+}
+
+// ---------- slippage panel ----------
+async function loadSlippage() {
+  const params = new URLSearchParams();
+  const sym = qs("#sl-f-symbol").value.trim();
+  const ivl = qs("#sl-f-interval").value;
+  const from = qs("#sl-f-from").value;
+  const to = qs("#sl-f-to").value;
+  if (sym) params.set("symbol", sym);
+  if (ivl) params.set("interval", ivl);
+  if (from) params.set("from", new Date(from).toISOString());
+  if (to) params.set("to", new Date(to).toISOString());
+  const q = params.toString();
+  try {
+    const d = await apiFetch("/api/stats/slippage" + (q ? "?" + q : ""));
+    qs("#sl-total").textContent = fmtInt(d.total_fills);
+    qs("#sl-avg-pts").textContent = fmtNum(d.avg_deviation_pts, 3);
+    qs("#sl-avg-pct").textContent = fmtNum(d.avg_deviation_pct, 3) + "%";
+    qs("#sl-max").textContent = fmtNum(d.max_deviation_pts, 3);
+    qs("#sl-min").textContent = fmtNum(d.min_deviation_pts, 3);
+    const rows = d.by_interval || [];
+    const tbody = qs("#sl-table tbody");
+    tbody.innerHTML = rows.length === 0
+      ? `<tr><td colspan="6" class="empty">No fills match.</td></tr>`
+      : rows.map(r => `<tr>
+          <td>${escapeHtml(r.interval)}</td>
+          <td>${fmtInt(r.total_fills)}</td>
+          <td>${fmtNum(r.avg_deviation_pts, 3)}</td>
+          <td>${fmtNum(r.avg_deviation_pct, 3)}%</td>
+          <td>${fmtNum(r.max_deviation_pts, 3)}</td>
+          <td>${fmtNum(r.min_deviation_pts, 3)}</td>
+        </tr>`).join("");
+  } catch (e) {
+    addToast("Failed to load slippage: " + e.message);
+  }
+}
+
+// ---------- warnings ----------
+function pushWarning(w) {
+  state.warnings.unshift({ id: Math.random().toString(36).slice(2), ...w });
+  renderWarnings();
+}
+function dismissWarning(id) {
+  state.warnings = state.warnings.filter(w => w.id !== id);
+  renderWarnings();
+}
+function clearWarnings() { state.warnings = []; renderWarnings(); }
+function renderWarnings() {
+  qs("#warn-count").textContent = state.warnings.length;
+  const list = qs("#warn-list");
+  const empty = qs("#warn-empty");
+  if (state.warnings.length === 0) {
+    list.innerHTML = "";
+    empty.style.display = "block";
+    return;
+  }
+  empty.style.display = "none";
+  list.innerHTML = state.warnings.map(w => `
+    <div class="warning-row">
+      <div class="time">${fmtDateTime(w.ts)}</div>
+      <div><span class="pill amber">${escapeHtml(w.type)}</span></div>
+      <div><b>${escapeHtml(w.symbol || "—")}</b></div>
+      <div>${escapeHtml(w.interval || "—")}</div>
+      <div>${escapeHtml(w.description || "")}</div>
+      <div><button onclick="dismissWarning('${w.id}')">Dismiss</button></div>
+    </div>`).join("");
+}
+
+// ---------- toasts ----------
+function addToast(msg) {
+  const stack = qs("#toast-stack");
+  const el = document.createElement("div");
+  el.className = "toast";
+  el.innerHTML = `<span>${escapeHtml(msg)}</span>
+    <button class="close" title="Dismiss">&times;</button>`;
+  el.querySelector(".close").onclick = () => el.remove();
+  stack.appendChild(el);
+}
+
+// ---------- render all ----------
+function renderAll() {
+  renderStatusBar();
+  renderMaintenanceBanner();
+  renderAccount();
+  renderPositions();
+  renderSignals();
+  renderOrders();
+  renderWarnings();
+}
+
+// ---------- filters wire-up ----------
+function wireFilters() {
+  ["#pos-f-symbol", "#pos-f-interval"].forEach(s => qs(s).addEventListener("input", renderPositions));
+  qs("#pos-f-interval").addEventListener("change", renderPositions);
+  ["#sig-f-symbol", "#sig-f-interval", "#sig-f-action", "#sig-f-status", "#sig-f-format"]
+    .forEach(s => qs(s).addEventListener("input", renderSignals));
+  ["#ord-f-symbol", "#ord-f-interval", "#ord-f-role", "#ord-f-type", "#ord-f-status"]
+    .forEach(s => qs(s).addEventListener("input", renderOrders));
+  ["#sig-f-interval", "#sig-f-action", "#sig-f-status", "#sig-f-format",
+   "#ord-f-interval", "#ord-f-role", "#ord-f-type", "#ord-f-status"]
+    .forEach(s => qs(s).addEventListener("change", () => {
+      if (s.startsWith("#sig")) renderSignals(); else renderOrders();
+    }));
+}
+
+// ---------- uptime polling (from /api/status) ----------
+async function pollStatus() {
+  try {
+    const s = await apiFetch("/api/status");
+    state.uptimeSeconds = s.uptime_seconds ?? 0;
+    if (s.active_intervals) s.active_intervals.forEach(i => intervalsSeen.add(i));
+    refreshIntervalOptions();
+    renderStatusBar();
+  } catch (_) { /* quiet */ }
+}
+
+// ---------- boot ----------
+wireFilters();
+renderAll();
+pollStatus();
+setInterval(pollStatus, 15000);
+wsConnect();
+</script>
+</body>
+</html>
