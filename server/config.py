@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 # TradingView raw {{interval}} string -> normalized label
 _INTERVAL_MAP = {
+    "S": "1s",
     "1S": "1s",
     "1": "1m",
     "3": "3m",
