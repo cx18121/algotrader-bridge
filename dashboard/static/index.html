@@ -79,6 +79,8 @@
   button:hover { background: var(--border); }
   button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
   button.primary:hover { background: #3b8ae0; }
+  button.danger { background: rgba(239,91,91,.18); color: var(--red); border-color: var(--red); }
+  button.danger:hover { background: rgba(239,91,91,.35); }
 
   .banner { border-radius: 6px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; font-weight: 600; }
   .banner.maint { background: var(--maint-bg); border: 1px solid var(--maint-border); color: var(--amber); }
@@ -110,16 +112,31 @@
 
   .accepting-off { background: rgba(239, 91, 91, .18); color: var(--red); padding: 2px 8px; border-radius: 4px; }
   .accepting-on  { color: var(--muted); }
+
+  .modal-backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65); z-index:10000; align-items:center; justify-content:center; }
+  .modal-backdrop.open { display:flex; }
+  .modal { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:16px 18px; max-width:720px; width:94%; max-height:80vh; display:flex; flex-direction:column; gap:10px; }
+  .modal header { display:flex; align-items:center; justify-content:space-between; }
+  .modal h3 { font-size:13px; color:var(--accent); }
+  .modal .close-btn { background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; padding:0 4px; }
+  .modal .close-btn:hover { color:var(--text); }
+  .modal .meta-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; }
+  .modal .meta-cell .label { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+  .modal .meta-cell .value { font-size:12px; font-weight:600; margin-top:2px; }
+  .modal .raw-label { color:var(--muted); font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+  .modal pre { background:var(--bg); border:1px solid var(--border); border-radius:4px; padding:10px; overflow:auto; font-size:11px; line-height:1.55; white-space:pre-wrap; word-break:break-all; flex:1; margin:0; color:var(--text); }
+  tbody tr.clickable { cursor:pointer; }
 </style>
 </head>
 <body>
 
 <header style="display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px;">
   <h1>AlgoTrader Bridge</h1>
-  <div class="small">
+  <div class="small" style="display:flex;align-items:center;gap:10px;">
     <span id="ws-indicator"><span class="dot gray"></span>Connecting…</span>
-    <span id="accepting" class="accepting-on" style="margin-left:10px;"></span>
-    <span id="last-event" style="margin-left:10px;"></span>
+    <span id="accepting" class="accepting-on"></span>
+    <span id="last-event"></span>
+    <button class="danger" onclick="showClearDbModal()" style="font-size:11px;padding:3px 8px;">Clear DB</button>
   </div>
 </header>
 
@@ -168,7 +185,7 @@
     <table id="pos-table">
       <thead><tr>
         <th>Symbol</th><th>Interval</th><th>Dir</th><th>Qty</th><th>Avg Cost</th><th>Mkt Price</th>
-        <th>Mkt Value</th><th>UPL</th><th>%</th><th>Trail Stop</th><th>Trail Offset</th><th>Opened</th>
+        <th>Mkt Value</th><th>UPL</th><th>%</th><th>Trail Stop</th><th>Trail Offset</th><th>Opened</th><th></th>
       </tr></thead>
       <tbody></tbody>
     </table>
@@ -249,6 +266,30 @@
   </section>
 </div>
 
+<!-- Panel: Closed Trades -->
+<section class="panel">
+  <header>
+    <h2>Closed Trades <span class="count-badge" id="ct-count">0</span></h2>
+    <div style="display:flex;align-items:center;gap:16px;">
+      <span class="small">Total realized P&amp;L: <b id="ct-total-pnl" style="font-size:13px;">—</b></span>
+      <div class="filters">
+        <input id="ct-f-symbol" placeholder="Symbol" size="6" />
+        <select id="ct-f-interval"><option value="">All intervals</option></select>
+        <select id="ct-f-dir"><option value="">All dirs</option><option>long</option><option>short</option></select>
+      </div>
+    </div>
+  </header>
+  <div class="scroll-x">
+  <table id="ct-table">
+    <thead><tr>
+      <th>Opened</th><th>Closed</th><th>Duration</th><th>Symbol</th><th>Interval</th>
+      <th>Dir</th><th>Qty</th><th>Avg Entry</th><th>Realized P&amp;L</th><th>P&amp;L / unit</th>
+    </tr></thead>
+    <tbody></tbody>
+  </table>
+  </div>
+</section>
+
 <!-- Panel 6 + Panel 7 -->
 <div class="panels-grid">
   <!-- Panel 6: Slippage -->
@@ -295,6 +336,35 @@
 
 <div id="toast-stack" class="toast-stack"></div>
 
+<!-- Clear DB confirmation modal -->
+<div id="clear-db-modal" class="modal-backdrop" onclick="if(event.target===this)hideClearDbModal()">
+  <div class="modal" style="max-width:400px;">
+    <header>
+      <h3 style="color:var(--red);">⚠ Clear All Data</h3>
+      <button class="close-btn" onclick="hideClearDbModal()">&times;</button>
+    </header>
+    <p style="margin:12px 0 6px;">This will permanently delete <b>all signals, orders, fills, positions, and trade history</b> from the database.</p>
+    <p style="color:var(--red);font-weight:600;margin-bottom:16px;">This action cannot be undone.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="hideClearDbModal()">Cancel</button>
+      <button class="danger" onclick="adminClearDb()">Yes, clear everything</button>
+    </div>
+  </div>
+</div>
+
+<!-- Signal detail modal -->
+<div id="sig-modal" class="modal-backdrop" onclick="closeSigModal(event)">
+  <div class="modal">
+    <header>
+      <h3 id="sig-modal-title">Signal #—</h3>
+      <button class="close-btn" onclick="closeSigModal()">&times;</button>
+    </header>
+    <div class="meta-grid" id="sig-modal-meta"></div>
+    <div class="raw-label">Raw alert body</div>
+    <pre id="sig-modal-raw">Loading…</pre>
+  </div>
+</div>
+
 <script>
 "use strict";
 
@@ -308,6 +378,7 @@ const state = {
   maintenance: { mode: "normal", message: "", resumes_at: null },
   accepting: true,
   warnings: [],       // local, not persisted
+  closedTrades: [],   // closed positions (qty=0)
   stale: false,       // tws disconnected
   startTime: null,    // approximated from first snapshot
   uptimeSeconds: 0,
@@ -513,6 +584,7 @@ function scheduleRefresh(kind) {
         renderPositions();
         renderStatusBar();
       } catch (e) { /* quiet */ }
+      loadClosedTrades();
     }, 150);
   }
 }
@@ -674,7 +746,7 @@ function renderPositions() {
   );
   qs("#pos-count").textContent = rows.length;
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="12" class="empty">No open positions.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" class="empty">No open positions.</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(p => {
@@ -696,6 +768,8 @@ function renderPositions() {
       <td>${p.trail_stop_price != null ? fmtUsd(p.trail_stop_price) : "—"}</td>
       <td>${p.trail_amount != null ? fmtNum(p.trail_amount, 2) : "—"}</td>
       <td>${fmtDateTime(p.opened_at)}</td>
+      <td><button class="danger" style="font-size:11px;padding:2px 8px;"
+        onclick="adminClosePosition(${JSON.stringify(p.symbol)},${JSON.stringify(p.direction)},${JSON.stringify(p.interval||null)})">Close</button></td>
     </tr>`;
   }).join("");
 }
@@ -720,7 +794,7 @@ function renderSignals() {
     tbody.innerHTML = `<tr><td colspan="11" class="empty">No signals.</td></tr>`;
     return;
   }
-  tbody.innerHTML = rows.map(s => `<tr>
+  tbody.innerHTML = rows.map(s => `<tr class="clickable" onclick="openSigModal(${s.id})" title="Click to view raw alert">
     <td>${fmtDateTime(s.received_at)}</td>
     <td><b>${escapeHtml(s.symbol || "—")}</b></td>
     <td>${escapeHtml(s.interval || "—")}</td>
@@ -784,7 +858,7 @@ function renderOrders() {
 // ---------- render: interval filters ----------
 function refreshIntervalOptions() {
   const ivls = Array.from(intervalsSeen).sort();
-  for (const sel of ["#pos-f-interval", "#sig-f-interval", "#ord-f-interval", "#sl-f-interval"]) {
+  for (const sel of ["#pos-f-interval", "#sig-f-interval", "#ord-f-interval", "#sl-f-interval", "#ct-f-interval"]) {
     const el = qs(sel);
     const current = el.value;
     el.innerHTML = `<option value="">${sel === "#pos-f-interval" ? "all" : "All intervals"}</option>` +
@@ -907,10 +981,183 @@ async function pollStatus() {
   } catch (_) { /* quiet */ }
 }
 
+// ---------- admin actions ----------
+function apiPost(path, body) {
+  return fetch(path, {
+    method: "POST", credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); });
+}
+
+async function adminClosePosition(symbol, direction, interval) {
+  if (!confirm(`Close ${direction.toUpperCase()} ${symbol}${interval ? " (" + interval + ")" : ""}?`)) return;
+  try {
+    const r = await apiPost("/api/admin/close-position", { symbol, direction, interval });
+    addToast(`Close signal injected — signal #${r.signal_id}`);
+    // Poll positions after a short delay so the panel reflects whether the
+    // close actually went through (fill received) or was rejected (TWS down).
+    setTimeout(async () => {
+      try {
+        const rows = await apiFetch("/api/positions?active_only=true");
+        state.positions = rows;
+        rows.forEach(p => { if (p.interval) intervalsSeen.add(p.interval); });
+        refreshIntervalOptions();
+        renderPositions();
+        renderStatusBar();
+        const stillOpen = rows.some(p =>
+          p.symbol === symbol && p.direction === direction &&
+          (!interval || p.interval === interval)
+        );
+        if (stillOpen) {
+          addToast(`⚠ ${direction.toUpperCase()} ${symbol} still open — close may have failed (check TWS connection)`);
+        } else {
+          loadClosedTrades();
+        }
+      } catch (_) {}
+    }, 4000);
+  } catch (e) {
+    addToast("Close failed: " + e.message);
+  }
+}
+
+function showClearDbModal() {
+  qs("#clear-db-modal").classList.add("open");
+}
+function hideClearDbModal() {
+  qs("#clear-db-modal").classList.remove("open");
+}
+async function adminClearDb() {
+  hideClearDbModal();
+  try {
+    const r = await apiPost("/api/admin/clear-db", {});
+    const summary = Object.entries(r.counts).map(([k, v]) => `${k}: ${v}`).join(", ");
+    addToast("DB cleared — " + summary);
+    state.signals = []; state.orders = []; state.positions = []; state.account = null;
+    state.closedTrades = [];
+    renderAll();
+    renderClosedTrades();
+  } catch (e) {
+    addToast("Clear failed: " + e.message);
+  }
+}
+
+// ---------- closed trades ----------
+async function loadClosedTrades() {
+  try {
+    const rows = await apiFetch("/api/trade-history");
+    state.closedTrades = rows; // already sorted desc by server
+    renderClosedTrades();
+  } catch (_) { /* quiet */ }
+}
+
+function renderClosedTrades() {
+  const tbody = qs("#ct-table tbody");
+  const sym = qs("#ct-f-symbol").value.trim().toUpperCase();
+  const ivl = qs("#ct-f-interval").value;
+  const dir = qs("#ct-f-dir").value;
+  const rows = (state.closedTrades || []).filter(p =>
+    (!sym || (p.symbol || "").toUpperCase().includes(sym)) &&
+    (!ivl || p.interval === ivl) &&
+    (!dir || p.direction === dir)
+  );
+  qs("#ct-count").textContent = rows.length;
+
+  const totalPnl = rows.reduce((s, p) => s + (p.realized_pnl || 0), 0);
+  const totalEl = qs("#ct-total-pnl");
+  totalEl.textContent = fmtUsd(totalPnl);
+  totalEl.className = totalPnl >= 0 ? "pos" : "neg";
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="10" class="empty">No closed trades yet.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(p => {
+    const pnl = p.realized_pnl ?? null;
+    const pnlCls = pnl == null ? "" : pnl >= 0 ? "pos" : "neg";
+    const perUnit = (p.close_fill_price != null && p.avg_cost != null)
+      ? (p.direction === "long"
+          ? p.close_fill_price - p.avg_cost
+          : p.avg_cost - p.close_fill_price)
+      : null;
+    const dur = (p.opened_at && p.closed_at)
+      ? fmtDuration(new Date(p.closed_at) - new Date(p.opened_at))
+      : "—";
+    const dirPill = `<span class="pill ${p.direction === "long" ? "green" : "red"}">${escapeHtml((p.direction || "").toUpperCase())}</span>`;
+    return `<tr>
+      <td>${fmtDateTime(p.opened_at)}</td>
+      <td>${fmtDateTime(p.closed_at)}</td>
+      <td>${dur}</td>
+      <td><b>${escapeHtml(p.symbol)}</b></td>
+      <td>${escapeHtml(p.interval || "—")}</td>
+      <td>${dirPill}</td>
+      <td>${fmtInt(p.qty)}</td>
+      <td>${fmtUsd(p.avg_cost)}</td>
+      <td class="${pnlCls}" style="font-weight:700;font-size:13px;">${fmtUsd(pnl)}</td>
+      <td class="${perUnit == null ? "" : perUnit >= 0 ? "pos" : "neg"}">${perUnit != null ? fmtUsd(perUnit) : "—"}</td>
+    </tr>`;
+  }).join("");
+}
+
+function fmtDuration(ms) {
+  if (!ms || ms < 0) return "—";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60), rem = s % 60;
+  if (m < 60) return `${m}m ${rem}s`;
+  const h = Math.floor(m / 60), rm = m % 60;
+  return `${h}h ${rm}m`;
+}
+
+// ---------- signal detail modal ----------
+async function openSigModal(sigId) {
+  const modal = qs("#sig-modal");
+  qs("#sig-modal-title").textContent = `Signal #${sigId}`;
+  qs("#sig-modal-meta").innerHTML = "";
+  qs("#sig-modal-raw").textContent = "Loading…";
+  modal.classList.add("open");
+  try {
+    const s = await apiFetch(`/api/signals/${sigId}`);
+    qs("#sig-modal-title").textContent = `Signal #${s.id} — ${s.symbol} ${s.raw_action}`;
+    const meta = [
+      ["Time", fmtDateTime(s.received_at)],
+      ["Symbol", s.symbol || "—"],
+      ["Action", s.raw_action || "—"],
+      ["Status", s.status || "—"],
+      ["Interval", s.interval || "—"],
+      ["Strategy", s.strategy || "—"],
+      ["Format", s.parse_format || "—"],
+      ["Close Px", fmtUsd(s.close_price)],
+    ];
+    qs("#sig-modal-meta").innerHTML = meta.map(([label, value]) =>
+      `<div class="meta-cell"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(String(value))}</div></div>`
+    ).join("");
+    const raw = s.raw_body || "(empty)";
+    // Pretty-print if JSON, else show as-is.
+    let display = raw;
+    try { display = JSON.stringify(JSON.parse(raw), null, 2); } catch { /* plaintext — fine */ }
+    qs("#sig-modal-raw").textContent = display;
+  } catch (e) {
+    qs("#sig-modal-raw").textContent = "Failed to load: " + e.message;
+  }
+}
+
+function closeSigModal(event) {
+  if (event && event.target !== qs("#sig-modal")) return;
+  qs("#sig-modal").classList.remove("open");
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") qs("#sig-modal").classList.remove("open");
+});
+
 // ---------- boot ----------
 wireFilters();
+["#ct-f-symbol", "#ct-f-interval", "#ct-f-dir"].forEach(s => qs(s).addEventListener("input", renderClosedTrades));
+["#ct-f-interval", "#ct-f-dir"].forEach(s => qs(s).addEventListener("change", renderClosedTrades));
 renderAll();
 pollStatus();
+loadClosedTrades();
 setInterval(pollStatus, 15000);
 wsConnect();
 </script>

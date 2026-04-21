@@ -13,6 +13,13 @@ from typing import Optional
 
 from .config import normalize_interval
 
+_TV_SUFFIX_RE = re.compile(r"\d+!$")
+
+
+def _normalize_symbol(raw: str) -> str:
+    """Strip TradingView continuous-contract suffix (e.g. 'MBT1!' -> 'MBT')."""
+    return _TV_SUFFIX_RE.sub("", raw.strip().upper())
+
 log = logging.getLogger(__name__)
 
 
@@ -134,7 +141,7 @@ def _try_parse_json(text: str) -> Optional[ParsedSignal]:
         order_side=side,
         position_action=pos_action,
         direction=direction,
-        symbol=symbol.strip().upper(),
+        symbol=_normalize_symbol(symbol),
         close_price=close_price,
         interval=interval,
         strategy=strategy,
@@ -193,7 +200,7 @@ def _parse_plaintext(text: str) -> ParsedSignal:
     symbol: str
     close_price: Optional[float] = None
     if sp:
-        symbol = sp.group(1).strip().upper()
+        symbol = _normalize_symbol(sp.group(1))
         try:
             close_price = float(sp.group(2))
         except ValueError:
@@ -203,7 +210,7 @@ def _parse_plaintext(text: str) -> ParsedSignal:
         segs = [s.strip() for s in text.split("|")]
         if len(segs) >= 2 and "@" in segs[1]:
             left, right = segs[1].split("@", 1)
-            symbol = left.strip().upper()
+            symbol = _normalize_symbol(left)
             try:
                 close_price = float(right.strip())
             except ValueError:

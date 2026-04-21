@@ -8,20 +8,23 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from sqlalchemy import and_, func, select
+from pydantic import BaseModel
+from sqlalchemy import and_, delete, func, select
 
 from . import webhook as webhook_module
 from .config import settings
 from .database import get_session
-from .models import AccountSnapshot, Order, Position, Signal
+from .models import AccountSnapshot, Fill, Order, Position, Signal, TradeHistory
 from .schemas import (
     AccountOut,
     OrderOut,
     PositionOut,
+    SignalDetailOut,
     SignalOut,
     SlippageByInterval,
     SlippageOut,
     StatusOut,
+    TradeHistoryOut,
 )
 
 log = logging.getLogger(__name__)
@@ -158,13 +161,13 @@ async def list_signals(
     return [SignalOut.model_validate(r) for r in rows]
 
 
-@router.get("/signals/{signal_id}", response_model=SignalOut, dependencies=[Depends(_auth_guard)])
-async def get_signal(signal_id: int) -> SignalOut:
+@router.get("/signals/{signal_id}", response_model=SignalDetailOut, dependencies=[Depends(_auth_guard)])
+async def get_signal(signal_id: int) -> SignalDetailOut:
     async with get_session() as session:
         sig = await session.get(Signal, signal_id)
         if sig is None:
             raise HTTPException(status_code=404, detail="signal not found")
-        return SignalOut.model_validate(sig)
+        return SignalDetailOut.model_validate(sig)
 
 
 # ---------------- /api/orders ----------------
@@ -374,6 +377,120 @@ async def slippage_stats(
         pct_over_1_0=100.0 * sum(1 for x in abs_pcts if x > 1.0) / total,
         by_interval=by_interval_out,
     )
+
+
+# ---------------- /api/trade-history ----------------
+
+@router.get("/trade-history", response_model=list[TradeHistoryOut], dependencies=[Depends(_auth_guard)])
+async def list_trade_history(
+    symbol: Optional[str] = None,
+    direction: Optional[str] = None,
+    interval: Optional[str] = None,
+) -> list[TradeHistoryOut]:
+    stmt = select(TradeHistory)
+    if symbol:
+        stmt = stmt.where(TradeHistory.symbol == symbol.upper())
+    if direction:
+        stmt = stmt.where(TradeHistory.direction == direction)
+    if interval:
+        stmt = stmt.where(TradeHistory.interval == interval)
+    stmt = stmt.order_by(TradeHistory.closed_at.desc())
+    async with get_session() as session:
+        rows = (await session.execute(stmt)).scalars().all()
+    return [TradeHistoryOut.model_validate(r) for r in rows]
+
+
+# ---------------- /api/admin ----------------
+
+class _ClosePositionIn(BaseModel):
+    symbol: str
+    direction: str
+    interval: Optional[str] = None
+
+
+@router.post("/admin/close-position", dependencies=[Depends(_auth_guard)])
+async def admin_close_position(body: _ClosePositionIn) -> dict:
+    sig_id = await webhook_module.inject_close_signal(body.symbol, body.direction, body.interval)
+    return {"status": "accepted", "signal_id": sig_id}
+
+
+@router.post("/admin/clear-db", dependencies=[Depends(_auth_guard)])
+async def admin_clear_db() -> dict:
+    counts: dict[str, int] = {}
+    async with get_session() as session:
+        for model, name in [
+            (Fill, "fills"), (Order, "orders"), (Signal, "signals"),
+            (Position, "positions"), (AccountSnapshot, "account_snapshots"),
+            (TradeHistory, "trade_history"),
+        ]:
+            result = await session.execute(delete(model))
+            counts[name] = result.rowcount
+        await session.commit()
+    log.info("admin_clear_db", extra={"counts": counts})
+    return {"status": "cleared", "counts": counts}
+
+
+# ---------------- /api/contracts ----------------
+
+from .models import ContractMap  # noqa: E402 -- imported here to avoid circular at top
+
+
+class _ContractMapOut(BaseModel):
+    tv_symbol: str
+    ib_symbol: str
+    sec_type: str
+    exchange: str
+    currency: str
+    last_trade_date: Optional[str]
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class _ContractMapIn(BaseModel):
+    ib_symbol: str
+    sec_type: str = "stock"
+    exchange: str = "SMART"
+    currency: str = "USD"
+    last_trade_date: Optional[str] = None
+
+
+@router.get("/contracts", dependencies=[Depends(_auth_guard)])
+async def list_contracts() -> list[_ContractMapOut]:
+    async with get_session() as session:
+        rows = (await session.execute(select(ContractMap).order_by(ContractMap.tv_symbol))).scalars().all()
+    return [_ContractMapOut.model_validate(r) for r in rows]
+
+
+@router.put("/contracts/{tv_symbol}", dependencies=[Depends(_auth_guard)])
+async def upsert_contract(tv_symbol: str, body: _ContractMapIn) -> _ContractMapOut:
+    key = tv_symbol.upper()
+    async with get_session() as session:
+        row = (await session.execute(select(ContractMap).where(ContractMap.tv_symbol == key))).scalar_one_or_none()
+        if row is None:
+            row = ContractMap(tv_symbol=key)
+            session.add(row)
+        row.ib_symbol = body.ib_symbol
+        row.sec_type = body.sec_type
+        row.exchange = body.exchange
+        row.currency = body.currency
+        row.last_trade_date = body.last_trade_date
+        await session.commit()
+        await session.refresh(row)
+    log.info("contract_map_upserted", extra={"tv_symbol": key})
+    return _ContractMapOut.model_validate(row)
+
+
+@router.delete("/contracts/{tv_symbol}", dependencies=[Depends(_auth_guard)])
+async def delete_contract(tv_symbol: str) -> dict:
+    key = tv_symbol.upper()
+    async with get_session() as session:
+        result = await session.execute(delete(ContractMap).where(ContractMap.tv_symbol == key))
+        await session.commit()
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail=f"No mapping for {key}")
+    log.info("contract_map_deleted", extra={"tv_symbol": key})
+    return {"status": "deleted", "tv_symbol": key}
 
 
 __all__ = ["router"]

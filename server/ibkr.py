@@ -27,6 +27,8 @@ from typing import Any, Awaitable, Callable, Optional
 # already the current loop. The names below are placeholders until then.
 IB = object  # type: ignore
 Contract = object  # type: ignore
+ContFuture = object  # type: ignore
+Future = object  # type: ignore
 MarketOrder = object  # type: ignore
 Order = object  # type: ignore
 Stock = object  # type: ignore
@@ -38,7 +40,7 @@ _IB_IMPORT_ERROR: Optional[str] = None
 
 def _lazy_import_ib_insync() -> bool:
     """Import ib_insync from inside a running event loop. Returns True on success."""
-    global IB, Contract, MarketOrder, Order, Stock, Trade, util, _IB_AVAILABLE, _IB_IMPORT_ERROR
+    global IB, Contract, ContFuture, Future, MarketOrder, Order, Stock, Trade, util, _IB_AVAILABLE, _IB_IMPORT_ERROR
     if _IB_AVAILABLE:
         return True
     # Ensure the current running loop is also the policy's "current event loop".
@@ -53,6 +55,8 @@ def _lazy_import_ib_insync() -> bool:
         from ib_insync import (  # type: ignore
             IB as _IB,
             Contract as _Contract,
+            ContFuture as _ContFuture,
+            Future as _Future,
             MarketOrder as _MarketOrder,
             Order as _Order,
             Stock as _Stock,
@@ -61,6 +65,8 @@ def _lazy_import_ib_insync() -> bool:
         )
         IB = _IB
         Contract = _Contract
+        ContFuture = _ContFuture
+        Future = _Future
         MarketOrder = _MarketOrder
         Order = _Order
         Stock = _Stock
@@ -71,6 +77,52 @@ def _lazy_import_ib_insync() -> bool:
     except Exception as e:  # pragma: no cover
         _IB_IMPORT_ERROR = f"{type(e).__name__}: {e}"
         return False
+
+
+async def _build_contract(symbol: str):
+    """Resolve a TradingView symbol to an ib_insync contract.
+
+    Queries the contract_map DB table first (hot-updatable for futures rolls).
+    Falls back to the CONTRACT_MAP env spec, then Stock(symbol, SMART, USD).
+    Strips the TV continuous-future suffix (``MBT1!`` -> ``MBT``) before lookup.
+    Caller is responsible for qualifyContractsAsync().
+    """
+    import re
+
+    from sqlalchemy import select
+
+    from .database import get_session
+    from .models import ContractMap
+
+    raw = (symbol or "").upper()
+    base = re.sub(r"\d+!$", "", raw)
+
+    sec, sym, exch, ccy, last = "stock", base, "SMART", "USD", None
+    async with get_session() as sess:
+        row = await sess.execute(
+            select(ContractMap).where(ContractMap.tv_symbol == base)
+        )
+        mapping = row.scalar_one_or_none()
+    if mapping:
+        sec, sym, exch, ccy, last = (
+            mapping.sec_type, mapping.ib_symbol, mapping.exchange,
+            mapping.currency, mapping.last_trade_date,
+        )
+    else:
+        # Fall back to env-based spec so existing configs keep working.
+        spec = settings().resolve_contract_spec(symbol)
+        sec, sym, exch, ccy, last = (
+            spec["sec_type"], spec["symbol"], spec["exchange"],
+            spec["currency"], spec.get("last_trade_date"),
+        )
+
+    if sec == "cont_future":
+        return ContFuture(sym, exch, ccy)
+    if sec == "future":
+        if last:
+            return Future(sym, last, exch, currency=ccy)
+        return Future(sym, exchange=exch, currency=ccy)
+    return Stock(sym, exch or "SMART", ccy or "USD")
 
 from .config import settings
 
@@ -188,7 +240,16 @@ class IBKRClient:
         if self.ib is None:
             return
         try:
-            # execDetailsEvent fires on each fill execution.
+            # Remove first so repeated reconnects don't accumulate duplicate handlers.
+            for ev, handler in [
+                (self.ib.execDetailsEvent, self._on_exec_details),
+                (self.ib.orderStatusEvent, self._on_order_status),
+                (self.ib.disconnectedEvent, self._on_disconnected),
+            ]:
+                try:
+                    ev -= handler
+                except Exception:
+                    pass
             self.ib.execDetailsEvent += self._on_exec_details
             self.ib.orderStatusEvent += self._on_order_status
             self.ib.disconnectedEvent += self._on_disconnected
@@ -257,7 +318,7 @@ class IBKRClient:
             log.error("place_market_disconnected", extra={"symbol": symbol})
             return None
         try:
-            contract = Stock(symbol, "SMART", "USD")
+            contract = await _build_contract(symbol)
             await self.ib.qualifyContractsAsync(contract)
             order = MarketOrder(action, qty)
             trade = self.ib.placeOrder(contract, order)
@@ -284,7 +345,7 @@ class IBKRClient:
             log.error("place_trail_disconnected", extra={"symbol": symbol})
             return None
         try:
-            contract = Stock(symbol, "SMART", "USD")
+            contract = await _build_contract(symbol)
             await self.ib.qualifyContractsAsync(contract)
             order = Order()
             order.action = action

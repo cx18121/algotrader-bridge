@@ -21,7 +21,7 @@ from sqlalchemy import select, func as sql_func
 
 from .config import settings
 from .database import get_session
-from .models import Fill, Order, Position, Signal
+from .models import Fill, Order, Position, Signal, TradeHistory
 from .signal_parser import ParsedSignal
 
 log = logging.getLogger(__name__)
@@ -484,8 +484,8 @@ class OrderRouter:
             else:
                 order.status = "partially_filled"
 
-            # Slippage calc for entry orders at full fill.
-            just_became_filled = (order.status == "filled") and (order.order_role == "entry")
+            # Slippage calc for any signal-driven order at full fill (entry or exit).
+            just_became_filled = (order.status == "filled")
             if just_became_filled and order.signal_close_price:
                 order.fill_deviation_pts = new_avg - order.signal_close_price
                 order.fill_deviation_pct = (order.fill_deviation_pts / order.signal_close_price) * 100.0
@@ -534,13 +534,24 @@ class OrderRouter:
                     )
                     session.add(pos)
                 else:
-                    # Adding to existing (shouldn't normally happen in v1 with reject-if-open).
-                    total_cost = (pos.avg_cost or 0) * (pos.qty or 0) + new_avg * new_total
-                    combined_qty = (pos.qty or 0) + new_total
-                    pos.qty = combined_qty
-                    pos.avg_cost = total_cost / combined_qty if combined_qty else 0
-                    pos.last_updated = fill_time
-                    pos.closed_at = None
+                    if pos.qty == 0:
+                        # Re-entry after a completed close: start a fresh cycle on the same row.
+                        # Reset realized_pnl so this cycle's P&L is tracked independently.
+                        pos.qty = new_total
+                        pos.avg_cost = new_avg
+                        pos.last_updated = fill_time
+                        pos.opened_at = fill_time
+                        pos.closed_at = None
+                        pos.realized_pnl = 0.0
+                        pos.close_fill_price = None
+                    else:
+                        # Pyramid add (shouldn't happen in v1 with reject-if-open guard).
+                        total_cost = (pos.avg_cost or 0) * pos.qty + new_avg * new_total
+                        combined_qty = pos.qty + new_total
+                        pos.qty = combined_qty
+                        pos.avg_cost = total_cost / combined_qty if combined_qty else 0
+                        pos.last_updated = fill_time
+                        pos.closed_at = None
                 log.info("position_opened", extra={"symbol": symbol, "direction": direction,
                                                     "qty": new_total, "avg_cost": new_avg})
                 await session.commit()
@@ -554,6 +565,18 @@ class OrderRouter:
 
             if order.order_role in ("exit", "trail_stop") and pos is not None:
                 self._apply_close_to_position(pos, new_avg, order.fill_qty, fill_time)
+                if pos.qty == 0:
+                    session.add(TradeHistory(
+                        symbol=pos.symbol,
+                        direction=pos.direction,
+                        interval=pos.interval,
+                        qty=order.fill_qty,
+                        avg_cost=pos.avg_cost,
+                        close_fill_price=pos.close_fill_price,
+                        realized_pnl=pos.realized_pnl,
+                        opened_at=pos.opened_at,
+                        closed_at=pos.closed_at,
+                    ))
                 await session.commit()
                 await self._broadcast("fill", {
                     "order_id": order.id, "symbol": symbol, "fill_qty": order.fill_qty,
@@ -581,6 +604,7 @@ class OrderRouter:
         pos.last_updated = fill_time
         if pos.qty == 0:
             pos.closed_at = fill_time
+            pos.close_fill_price = fill_price
             log.info(
                 "position_closed",
                 extra={"symbol": pos.symbol, "direction": pos.direction,
@@ -687,7 +711,7 @@ class OrderRouter:
                 .where(Order.direction == pos.direction)
                 .where(Order.interval == pos.interval)
                 .where(Order.order_role == "trail_stop")
-                .where(Order.status.in_(("submitted", "partially_filled")))
+                .where(Order.status.in_(("submitted", "working", "partially_filled")))
                 .order_by(Order.id.desc())
                 .limit(1)
             )
@@ -743,6 +767,7 @@ def _position_snapshot(pos: Position) -> dict:
         "qty": pos.qty,
         "avg_cost": pos.avg_cost,
         "realized_pnl": pos.realized_pnl,
+        "close_fill_price": pos.close_fill_price,
         "last_updated": pos.last_updated.isoformat() if pos.last_updated else None,
         "opened_at": pos.opened_at.isoformat() if pos.opened_at else None,
         "closed_at": pos.closed_at.isoformat() if pos.closed_at else None,

@@ -52,10 +52,51 @@ async def get_session() -> AsyncIterator[AsyncSession]:
 
 async def init_db() -> None:
     """Create all tables if they do not exist. Imports models for side-effect."""
+    import json
+    import os
+    import re
+
+    from sqlalchemy import select
+
     from . import models  # noqa: F401 -- register ORM classes on Base.metadata
 
     async with engine().begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Additive migrations for columns added after initial deployment.
+        for sql in (
+            "ALTER TABLE positions ADD COLUMN close_fill_price REAL",
+        ):
+            try:
+                await conn.execute(__import__("sqlalchemy").text(sql))
+            except Exception:
+                pass  # column already exists
+
+    # Seed ContractMap from CONTRACT_MAP env if the table is empty.
+    raw_map = os.getenv("CONTRACT_MAP", "").strip()
+    if raw_map:
+        try:
+            parsed = json.loads(raw_map)
+        except json.JSONDecodeError:
+            parsed = {}
+        if isinstance(parsed, dict) and parsed:
+            async with session_factory()() as sess:
+                existing = await sess.execute(select(models.ContractMap))
+                if not existing.scalars().first():
+                    for tv_sym, spec in parsed.items():
+                        if not isinstance(spec, dict):
+                            continue
+                        base = re.sub(r"\d+!$", "", tv_sym.upper())
+                        sess.add(models.ContractMap(
+                            tv_symbol=base,
+                            ib_symbol=spec.get("symbol", base),
+                            sec_type=spec.get("sec_type", "stock"),
+                            exchange=spec.get("exchange", "SMART"),
+                            currency=spec.get("currency", "USD"),
+                            last_trade_date=spec.get("last_trade_date"),
+                        ))
+                    await sess.commit()
+                    log.info("contract_map_seeded_from_env")
+
     log.info("db_initialized", extra={"url": _get_url()})
 
 

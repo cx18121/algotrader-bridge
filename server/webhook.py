@@ -108,6 +108,28 @@ async def _push_signal(sig_id: int, parsed_or_none, status_: str, reason: Option
         log.warning("signal_broadcast_failed", extra={"signal_id": sig_id, "error": str(e)})
 
 
+async def _find_recent_unclosed_open(symbol: str) -> Optional[Signal]:
+    """Return the most recent accepted open_* Signal for `symbol` that has no
+    matching close after it. Used to detect a failed/pending entry whose order
+    never produced a Position row, so a follow-up generic alert in the opposite
+    direction can be rejected instead of silently flipping intent."""
+    async with get_session() as session:
+        stmt = (
+            select(Signal)
+            .where(Signal.symbol == symbol)
+            .where(Signal.status == "accepted")
+            .where(Signal.raw_action.in_(("open_long", "open_short", "close_long", "close_short")))
+            .order_by(Signal.received_at.desc())
+            .limit(1)
+        )
+        last = (await session.execute(stmt)).scalar_one_or_none()
+    if last is None:
+        return None
+    if last.raw_action in ("open_long", "open_short"):
+        return last
+    return None
+
+
 async def _resolve_generic_action(parsed: ParsedSignal) -> Optional[str]:
     """Resolve generic Pine strategy 'buy'/'sell' actions to concrete directional actions
     using current DB position state. Mutates `parsed` in place.
@@ -137,6 +159,17 @@ async def _resolve_generic_action(parsed: ParsedSignal) -> Optional[str]:
 
     raw = parsed.raw_action
     if pos is None:
+        # No actual position — but a prior accepted open may have failed to fill
+        # (e.g. contract unresolvable on IBKR). If so, a generic action in the
+        # opposite direction would silently flip intent. Reject instead.
+        recent_open = await _find_recent_unclosed_open(parsed.symbol)
+        if recent_open is not None:
+            recent_dir = "long" if recent_open.raw_action == "open_long" else "short"
+            if (raw == "buy" and recent_dir == "short") or (raw == "sell" and recent_dir == "long"):
+                return (
+                    f"{raw!r} signal conflicts with recent unresolved "
+                    f"{recent_open.raw_action} (signal id={recent_open.id}) on {parsed.symbol}"
+                )
         resolved = "open_long" if raw == "buy" else "open_short"
     elif pos.direction == "long":
         if raw == "sell":
@@ -355,6 +388,26 @@ async def _store_unsupported(body: bytes, source_ip: Optional[str], reason: str)
         await session.commit()
         await session.refresh(s)
         return s.id
+
+
+async def inject_close_signal(symbol: str, direction: str, interval: Optional[str]) -> int:
+    """Inject a manual close signal from the dashboard, bypassing webhook auth/dedup."""
+    from .signal_parser import ParsedSignal, _ACTION_META
+    raw_action = "close_long" if direction == "long" else "close_short"
+    side, pos_action, dir_ = _ACTION_META[raw_action]
+    parsed = ParsedSignal(
+        raw_action=raw_action, order_side=side, position_action=pos_action, direction=dir_,
+        symbol=symbol, close_price=None, interval=interval,
+        strategy="admin", qty=None, parse_format="json", secret=None,
+    )
+    sig_id = await _persist_signal(parsed, b"{}", source_ip="dashboard", status_="accepted", qty=None)
+    await _push_signal(sig_id, parsed, "accepted")
+    if _signal_queue is not None:
+        try:
+            _signal_queue.put_nowait({"signal_id": sig_id, "parsed": parsed, "resolved_qty": None})
+        except asyncio.QueueFull:
+            log.error("signal_queue_full", extra={"signal_id": sig_id})
+    return sig_id
 
 
 async def _find_recent_duplicate(parsed: ParsedSignal) -> Optional[int]:

@@ -1,8 +1,10 @@
 """Environment configuration loader with validation and normalization helpers."""
 from __future__ import annotations
 
+import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -147,6 +149,36 @@ class Settings:
     maintenance_close_minutes_before: int = 5
     maintenance_timezone: str = "America/New_York"
 
+    # Contract mapping: per-symbol overrides for IBKR contract resolution.
+    # Keys are base symbols (TV continuous-future suffixes like "1!"/"2!" are stripped
+    # before lookup). Values: {"sec_type": "cont_future"|"future"|"stock",
+    # "exchange": str, "currency": str, "last_trade_date": str|None}.
+    # When a symbol has no entry, the bridge defaults to Stock(SMART, USD).
+    contract_map: dict = field(default_factory=dict)
+
+    def resolve_contract_spec(self, symbol: str) -> dict:
+        """Return the contract spec for a symbol, stripping the TV "N!" suffix for
+        lookup. Always returns a dict with {"symbol", "sec_type", "exchange", "currency",
+        "last_trade_date"}; sec_type defaults to "stock" on SMART/USD when unmapped."""
+        raw = (symbol or "").upper()
+        base = re.sub(r"\d+!$", "", raw)
+        spec = self.contract_map.get(base) or self.contract_map.get(raw)
+        if spec:
+            return {
+                "symbol": base,
+                "sec_type": str(spec.get("sec_type", "stock")).lower(),
+                "exchange": spec.get("exchange", "SMART"),
+                "currency": spec.get("currency", "USD"),
+                "last_trade_date": spec.get("last_trade_date"),
+            }
+        return {
+            "symbol": raw,
+            "sec_type": "stock",
+            "exchange": "SMART",
+            "currency": "USD",
+            "last_trade_date": None,
+        }
+
     # --- Per-symbol / per-interval overrides (discovered at resolve time) ---
 
     def resolve_qty(self, symbol: str, interval: Optional[str], signal_qty: Optional[int]) -> int:
@@ -233,6 +265,22 @@ def load_settings() -> Settings:
         )
         partial_mode = "add"
 
+    contract_map: dict = {}
+    raw_map = os.getenv("CONTRACT_MAP", "").strip()
+    if raw_map:
+        try:
+            parsed_map = json.loads(raw_map)
+            if isinstance(parsed_map, dict):
+                for k, v in parsed_map.items():
+                    if isinstance(v, dict):
+                        contract_map[str(k).upper()] = v
+                    else:
+                        log.warning("contract_map_entry_not_object", extra={"key": k})
+            else:
+                log.warning("contract_map_not_object", extra={"type": type(parsed_map).__name__})
+        except json.JSONDecodeError as e:
+            log.warning("contract_map_invalid_json", extra={"error": str(e)})
+
     return Settings(
         webhook_secret=secret,
         webhook_rate_limit_rps=_env_int("WEBHOOK_RATE_LIMIT_RPS", 10),
@@ -262,6 +310,7 @@ def load_settings() -> Settings:
         maintenance_window_end=os.getenv("MAINTENANCE_WINDOW_END", "00:15"),
         maintenance_close_minutes_before=_env_int("MAINTENANCE_CLOSE_MINUTES_BEFORE", 5),
         maintenance_timezone=os.getenv("MAINTENANCE_TIMEZONE", "America/New_York"),
+        contract_map=contract_map,
     )
 
 

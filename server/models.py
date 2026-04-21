@@ -131,6 +131,7 @@ class Position(Base):
     market_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     unrealized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=0.0)
+    close_fill_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_updated: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
     opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -156,4 +157,38 @@ class AccountSnapshot(Base):
     equity_with_loan: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
 
-__all__ = ["Signal", "Order", "Fill", "Position", "AccountSnapshot"]
+class TradeHistory(Base):
+    __tablename__ = "trade_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String, nullable=False)
+    direction: Mapped[str] = mapped_column(String, nullable=False)
+    interval: Mapped[str] = mapped_column(String, nullable=False)
+    qty: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    close_fill_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("ix_trade_history_symbol", "symbol"),
+        Index("ix_trade_history_closed_at", "closed_at"),
+    )
+
+
+class ContractMap(Base):
+    """TV symbol → IBKR contract spec. Hot-updatable without server restart."""
+
+    __tablename__ = "contract_map"
+
+    tv_symbol: Mapped[str] = mapped_column(String, primary_key=True)  # e.g. "MBT"
+    ib_symbol: Mapped[str] = mapped_column(String, nullable=False)
+    sec_type: Mapped[str] = mapped_column(String, nullable=False, default="stock")
+    exchange: Mapped[str] = mapped_column(String, nullable=False, default="SMART")
+    currency: Mapped[str] = mapped_column(String, nullable=False, default="USD")
+    last_trade_date: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # e.g. "202603"
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+__all__ = ["Signal", "Order", "Fill", "Position", "AccountSnapshot", "TradeHistory", "ContractMap"]

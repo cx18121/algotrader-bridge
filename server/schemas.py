@@ -76,6 +76,7 @@ class PositionOut(_Out):
     market_value: Optional[float] = None
     unrealized_pnl: Optional[float] = None
     realized_pnl: Optional[float] = None
+    close_fill_price: Optional[float] = None
     last_updated: datetime
     opened_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
@@ -130,6 +131,23 @@ class SlippageOut(BaseModel):
     pct_within_1_0: float
     pct_over_1_0: float
     by_interval: list[SlippageByInterval]
+
+
+class TradeHistoryOut(_Out):
+    id: int
+    symbol: str
+    direction: str
+    interval: str
+    qty: int
+    avg_cost: Optional[float] = None
+    close_fill_price: Optional[float] = None
+    realized_pnl: Optional[float] = None
+    opened_at: Optional[datetime] = None
+    closed_at: Optional[datetime] = None
+
+
+class SignalDetailOut(SignalOut):
+    raw_body: Optional[str] = None
 
 
 class WebSocketEvent(BaseModel):
