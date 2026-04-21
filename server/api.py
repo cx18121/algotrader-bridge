@@ -73,6 +73,13 @@ async def _auth_guard(
         return
 
 
+# ---------------- /api/health (public, for healthchecks) ----------------
+
+@router.get("/health", include_in_schema=False)
+async def health() -> dict:
+    return {"status": "ok"}
+
+
 # ---------------- /api/status ----------------
 
 @router.get("/status", response_model=StatusOut, dependencies=[Depends(_auth_guard)])
