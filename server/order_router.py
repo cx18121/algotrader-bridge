@@ -530,13 +530,14 @@ class OrderRouter:
             else:
                 order.status = "partially_filled"
 
-            # Slippage: positive = price moved favorably from signal to fill, negative = unfavorably.
-            # Long (any role): favorable when price goes up → fill - signal (* +1)
-            # Short (any role): favorable when price goes down → signal - fill (* -1)
+            # Slippage: positive = favorable execution vs signal price, negative = unfavorable.
+            # Long entry/short exit: lower fill is better → signal - fill (direction_mult=-1, role_mult=+1 or -1*-1)
+            # Short entry/long exit: higher fill is better → fill - signal
             just_became_filled = (order.status == "filled")
             if just_became_filled and order.signal_close_price:
-                direction_mult = 1.0 if order.direction == "long" else -1.0
-                order.fill_deviation_pts = (new_avg - order.signal_close_price) * direction_mult
+                direction_mult = -1.0 if order.direction == "long" else 1.0
+                role_mult = -1.0 if order.order_role in ("exit", "trail_stop") else 1.0
+                order.fill_deviation_pts = (new_avg - order.signal_close_price) * direction_mult * role_mult
                 order.fill_deviation_pct = (order.fill_deviation_pts / order.signal_close_price) * 100.0
                 log.info(
                     "slippage_calculated",
