@@ -560,6 +560,7 @@ class OrderRouter:
                         last_updated=fill_time,
                         opened_at=fill_time,
                         realized_pnl=0.0,
+                        signal_entry_price=order.signal_close_price,
                     )
                     session.add(pos)
                 else:
@@ -573,6 +574,7 @@ class OrderRouter:
                         pos.closed_at = None
                         pos.realized_pnl = 0.0
                         pos.close_fill_price = None
+                        pos.signal_entry_price = order.signal_close_price
                     else:
                         # Pyramid add (shouldn't happen in v1 with reject-if-open guard).
                         total_cost = (pos.avg_cost or 0) * pos.qty + new_avg * new_total
@@ -603,6 +605,8 @@ class OrderRouter:
                         avg_cost=pos.avg_cost,
                         close_fill_price=pos.close_fill_price,
                         realized_pnl=pos.realized_pnl,
+                        signal_entry_price=pos.signal_entry_price,
+                        signal_close_price=order.signal_close_price,
                         opened_at=pos.opened_at,
                         closed_at=pos.closed_at,
                     ))

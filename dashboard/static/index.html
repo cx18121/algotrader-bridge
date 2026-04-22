@@ -307,6 +307,15 @@
   <canvas id="pnl-chart" height="80"></canvas>
 </section>
 
+<!-- Panel: Signal P&L Chart -->
+<section class="panel">
+  <header>
+    <h2>Cumulative Signal P&amp;L</h2>
+    <span class="small" style="color:var(--muted);">Based on TradingView prices — trades without signal prices omitted</span>
+  </header>
+  <canvas id="signal-pnl-chart" height="80"></canvas>
+</section>
+
 <!-- Panel 6 + Panel 7 -->
 <div class="panels-grid">
   <!-- Panel 6: Slippage -->
@@ -932,7 +941,7 @@ async function loadSlippage() {
 }
 
 // ---------- P&L chart ----------
-let _pnlChart = null;
+let _pnlChart = null, _signalPnlChart = null;
 function renderPnlChart(rows) {
   // rows already filtered + sorted desc by server; reverse to get asc by close time
   const sorted = rows.slice().sort((a, b) => new Date(a.closed_at) - new Date(b.closed_at));
@@ -956,50 +965,98 @@ function renderPnlChart(rows) {
     _pnlChart.data.datasets[0].borderColor = lineColor;
     _pnlChart.data.datasets[0].backgroundColor = fillColor;
     _pnlChart.update();
-    return;
+  } else {
+    _pnlChart = new Chart(ctx, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          data,
+          borderColor: lineColor,
+          backgroundColor: fillColor,
+          borderWidth: 2,
+          pointRadius: data.length < 60 ? 3 : 0,
+          pointHoverRadius: 5,
+          fill: true,
+          tension: 0.3,
+        }],
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => " $" + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: "#7b8797", maxTicksLimit: 8, maxRotation: 0 }, grid: { color: "#1f2a37" } },
+          y: { ticks: { color: "#7b8797", callback: (v) => "$" + v.toLocaleString() }, grid: { color: "#1f2a37" } },
+        },
+      },
+    });
   }
 
-  _pnlChart = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [{
-        data,
-        borderColor: lineColor,
-        backgroundColor: fillColor,
-        borderWidth: 2,
-        pointRadius: data.length < 60 ? 3 : 0,
-        pointHoverRadius: 5,
-        fill: true,
-        tension: 0.3,
-      }],
-    },
-    options: {
-      responsive: true,
-      animation: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            label: (ctx) => " $" + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  // Signal P&L chart
+  const sigSorted = rows.slice()
+    .filter(t => t.closed_at != null && t.signal_entry_price != null && t.signal_close_price != null)
+    .sort((a, b) => new Date(a.closed_at) - new Date(b.closed_at));
+  const sigLabels = [], sigData = [];
+  let sigCum = 0;
+  for (const t of sigSorted) {
+    const mult = t.direction === "long" ? 1 : -1;
+    const pnl = t.qty * (t.signal_close_price - t.signal_entry_price) * mult;
+    sigCum += pnl;
+    sigLabels.push(fmtDateTime(t.closed_at));
+    sigData.push(parseFloat(sigCum.toFixed(2)));
+  }
+  const sigCtx = qs("#signal-pnl-chart").getContext("2d");
+  const sigFinal = sigData.length ? sigData[sigData.length - 1] : 0;
+  const sigLine = sigFinal >= 0 ? "#3ecf8e" : "#ef5b5b";
+  const sigFill = sigFinal >= 0 ? "rgba(62,207,142,0.12)" : "rgba(239,91,91,0.12)";
+  if (_signalPnlChart) {
+    _signalPnlChart.data.labels = sigLabels;
+    _signalPnlChart.data.datasets[0].data = sigData;
+    _signalPnlChart.data.datasets[0].borderColor = sigLine;
+    _signalPnlChart.data.datasets[0].backgroundColor = sigFill;
+    _signalPnlChart.update();
+  } else {
+    _signalPnlChart = new Chart(sigCtx, {
+      type: "line",
+      data: {
+        labels: sigLabels,
+        datasets: [{
+          data: sigData,
+          borderColor: sigLine,
+          backgroundColor: sigFill,
+          borderWidth: 2,
+          pointRadius: sigData.length < 60 ? 3 : 0,
+          pointHoverRadius: 5,
+          fill: true,
+          tension: 0.3,
+        }],
+      },
+      options: {
+        responsive: true,
+        animation: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => " $" + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+            },
           },
         },
-      },
-      scales: {
-        x: {
-          ticks: { color: "#7b8797", maxTicksLimit: 8, maxRotation: 0 },
-          grid: { color: "#1f2a37" },
-        },
-        y: {
-          ticks: {
-            color: "#7b8797",
-            callback: (v) => "$" + v.toLocaleString(),
-          },
-          grid: { color: "#1f2a37" },
+        scales: {
+          x: { ticks: { color: "#7b8797", maxTicksLimit: 8, maxRotation: 0 }, grid: { color: "#1f2a37" } },
+          y: { ticks: { color: "#7b8797", callback: (v) => "$" + v.toLocaleString() }, grid: { color: "#1f2a37" } },
         },
       },
-    },
-  });
+    });
+  }
 }
 
 // ---------- warnings ----------

@@ -74,6 +74,9 @@ async def init_db() -> None:
         # Additive migrations for columns added after initial deployment.
         for sql in (
             "ALTER TABLE positions ADD COLUMN close_fill_price REAL",
+            "ALTER TABLE positions ADD COLUMN signal_entry_price REAL",
+            "ALTER TABLE trade_history ADD COLUMN signal_entry_price REAL",
+            "ALTER TABLE trade_history ADD COLUMN signal_close_price REAL",
         ):
             try:
                 await conn.execute(text(sql))

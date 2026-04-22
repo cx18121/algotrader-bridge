@@ -132,6 +132,7 @@ class Position(Base):
     unrealized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=0.0)
     close_fill_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    signal_entry_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_updated: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
     opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -168,6 +169,8 @@ class TradeHistory(Base):
     avg_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     close_fill_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     realized_pnl: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    signal_entry_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    signal_close_price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 

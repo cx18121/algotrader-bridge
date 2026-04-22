@@ -142,6 +142,8 @@ class TradeHistoryOut(_Out):
     avg_cost: Optional[float] = None
     close_fill_price: Optional[float] = None
     realized_pnl: Optional[float] = None
+    signal_entry_price: Optional[float] = None
+    signal_close_price: Optional[float] = None
     opened_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
 
