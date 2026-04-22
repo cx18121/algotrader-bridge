@@ -114,11 +114,12 @@ class OrderRouter:
             await self._replace_order(inflight, signal_id, parsed, qty, action)
             return
 
-        # Filled same-direction position => reject.
+        # Filled same-direction position => close it first, then open a new one.
         open_pos = await self._get_open_position(symbol, direction, interval)
         if open_pos is not None and open_pos.qty > 0:
-            await self._reject(signal_id, f"{direction} position already open for {symbol}")
-            return
+            close_action = "SELL" if direction == "long" else "BUY"
+            await self._place_close_for_position(signal_id, parsed, open_pos, close_action)
+            log.info("same_direction_flip", extra={"symbol": symbol, "direction": direction, "qty": open_pos.qty})
 
         # Opposite-direction in-flight => cancel + close partial, then proceed.
         opp = "short" if direction == "long" else "long"
