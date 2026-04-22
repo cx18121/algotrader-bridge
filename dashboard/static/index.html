@@ -869,7 +869,7 @@ function renderOrders() {
   }
   tbody.innerHTML = rows.map(o => {
     const action = `${o.action || ""}${o.direction ? " " + o.direction.toUpperCase() : ""}`.trim();
-    const slip = (o.order_role === "entry" && o.fill_deviation_pts != null)
+    const slip = (o.fill_deviation_pts != null)
       ? fmtNum(o.fill_deviation_pts, 2) + (o.fill_deviation_pct != null ? ` (${fmtNum(o.fill_deviation_pct, 2)}%)` : "")
       : "—";
     const replacedNote = o.replaced_by_signal_id
