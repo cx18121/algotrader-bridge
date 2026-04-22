@@ -33,6 +33,10 @@ _ACTION_META = {
     "close_long":     ("SELL", "close", "long"),
     "open_short":     ("SELL", "open",  "short"),
     "close_short":    ("BUY",  "close", "short"),
+    "long":           ("BUY",  "open",  "long"),   # alias for open_long
+    "short":          ("SELL", "open",  "short"),  # alias for open_short
+    "l-ts":           ("SELL", "close", "long"),   # long trailing stop fired
+    "s-ts":           ("BUY",  "close", "short"),  # short trailing stop fired
     "kernel_bullish": (None,   None,    None),
     "kernel_bearish": (None,   None,    None),
     "buy":            ("BUY",  None,    None),
