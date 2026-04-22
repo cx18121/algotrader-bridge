@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -198,13 +199,7 @@ def _auth_ok(provided: Optional[str]) -> bool:
     if not provided:
         return False
     expected = settings().webhook_secret
-    # Constant-time compare.
-    if len(provided) != len(expected):
-        return False
-    ok = 0
-    for a, b in zip(provided, expected):
-        ok |= ord(a) ^ ord(b)
-    return ok == 0
+    return hmac.compare_digest(provided, expected)
 
 
 @router.post("/webhook", response_model=WebhookResponse)

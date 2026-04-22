@@ -396,8 +396,8 @@ class MaintenanceScheduler:
                 o.ibkr_order_id = ibkr_id
                 await session.commit()
 
-        deadline = asyncio.get_event_loop().time() + CLOSE_FILL_TIMEOUT_SECONDS
-        while asyncio.get_event_loop().time() < deadline:
+        deadline = asyncio.get_running_loop().time() + CLOSE_FILL_TIMEOUT_SECONDS
+        while asyncio.get_running_loop().time() < deadline:
             async with get_session() as session:
                 cur = await session.get(Position, pos.id)
                 if cur is None or cur.qty == 0:

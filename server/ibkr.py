@@ -248,8 +248,8 @@ class IBKRClient:
             ]:
                 try:
                     ev -= handler
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.warning("wire_events_handler_remove_failed", extra={"handler": handler.__name__, "error": str(e)})
             self.ib.execDetailsEvent += self._on_exec_details
             self.ib.orderStatusEvent += self._on_order_status
             self.ib.disconnectedEvent += self._on_disconnected
@@ -292,23 +292,94 @@ class IBKRClient:
         pass
 
     async def _reconcile_on_connect(self) -> None:
-        """On (re)connect: fetch positions and open orders, update DB if needed.
+        """On (re)connect: compare IBKR live positions against the DB.
 
-        The order_router is authoritative for reconciliation logic. This method
-        emits an event so the router can run its reconciler.
+        Any DB position with qty > 0 that IBKR reports as zero (or opposite
+        direction) was closed during the disconnect window. We zero it out so
+        the router doesn't treat it as still open.
         """
+        from sqlalchemy import select
+
+        from .database import get_session
+        from .models import Position as DbPosition
+
         try:
-            positions = []
+            ibkr_positions = []
             open_orders = []
             if self.ib is not None:
-                positions = await asyncio.wait_for(self.ib.reqPositionsAsync() or [], timeout=10)
+                ibkr_positions = await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=10)
                 open_orders = self.ib.reqOpenOrders() or []
             log.info(
                 "startup_position_sync",
-                extra={"positions": len(positions), "open_orders": len(open_orders)},
+                extra={"ibkr_positions": len(ibkr_positions), "open_orders": len(open_orders)},
             )
         except Exception as e:
             log.warning("reconcile_on_connect_failed", extra={"error": str(e)})
+            return
+
+        # Build symbol → net qty map from IBKR (positive=long, negative=short).
+        ibkr_by_symbol: dict[str, float] = {}
+        for p in ibkr_positions:
+            sym = getattr(getattr(p, "contract", None), "symbol", None)
+            qty = float(getattr(p, "position", 0) or 0)
+            if sym:
+                ibkr_by_symbol[sym.upper()] = qty
+
+        try:
+            async with get_session() as session:
+                db_positions = (
+                    await session.execute(select(DbPosition).where(DbPosition.qty > 0))
+                ).scalars().all()
+
+                matched_symbols: set[str] = set()
+                for pos in db_positions:
+                    ibkr_qty = ibkr_by_symbol.get(pos.symbol.upper(), 0.0)
+                    ibkr_is_long = ibkr_qty > 0
+                    ibkr_is_short = ibkr_qty < 0
+                    consistent = (pos.direction == "long" and ibkr_is_long) or (
+                        pos.direction == "short" and ibkr_is_short
+                    )
+
+                    if ibkr_qty == 0.0 or not consistent:
+                        reason = "closed_during_disconnect" if ibkr_qty == 0.0 else "direction_mismatch"
+                        log.warning(
+                            "reconcile_position_zeroed",
+                            extra={
+                                "position_id": pos.id,
+                                "symbol": pos.symbol,
+                                "direction": pos.direction,
+                                "interval": pos.interval,
+                                "db_qty": pos.qty,
+                                "ibkr_qty": ibkr_qty,
+                                "reason": reason,
+                            },
+                        )
+                        pos.qty = 0
+                        pos.closed_at = datetime.now(timezone.utc)
+                    else:
+                        log.info(
+                            "reconcile_position_ok",
+                            extra={
+                                "position_id": pos.id,
+                                "symbol": pos.symbol,
+                                "direction": pos.direction,
+                                "ibkr_qty": ibkr_qty,
+                            },
+                        )
+                        matched_symbols.add(pos.symbol.upper())
+
+                await session.commit()
+
+            # Warn about IBKR positions that have no open DB row — these can't be
+            # auto-reconciled without signal/interval context.
+            for sym, ibkr_qty in ibkr_by_symbol.items():
+                if sym not in matched_symbols:
+                    log.warning(
+                        "reconcile_ibkr_position_unmatched",
+                        extra={"symbol": sym, "ibkr_qty": ibkr_qty},
+                    )
+        except Exception as e:
+            log.warning("reconcile_db_update_failed", extra={"error": str(e)})
 
     # --- Order placement ---
 

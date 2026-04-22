@@ -81,8 +81,8 @@ async def _persist_signal(symbol: str, interval: str, raw_action: str) -> int:
 
 
 async def _wait_until(pred, timeout_s: float, label: str) -> None:
-    deadline = asyncio.get_event_loop().time() + timeout_s
-    while asyncio.get_event_loop().time() < deadline:
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
         if await pred():
             return
         await asyncio.sleep(0.05)

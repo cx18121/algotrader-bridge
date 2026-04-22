@@ -5,6 +5,8 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from sqlalchemy import event, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -29,6 +31,13 @@ def engine():
     global _engine
     if _engine is None:
         _engine = create_async_engine(_get_url(), echo=False, future=True)
+
+        @event.listens_for(_engine.sync_engine, "connect")
+        def _set_wal(dbapi_conn, _record):
+            cursor = dbapi_conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.close()
+
     return _engine
 
 
@@ -67,9 +76,10 @@ async def init_db() -> None:
             "ALTER TABLE positions ADD COLUMN close_fill_price REAL",
         ):
             try:
-                await conn.execute(__import__("sqlalchemy").text(sql))
-            except Exception:
-                pass  # column already exists
+                await conn.execute(text(sql))
+            except OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
 
     # Seed ContractMap from CONTRACT_MAP env if the table is empty.
     raw_map = os.getenv("CONTRACT_MAP", "").strip()

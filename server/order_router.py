@@ -370,7 +370,7 @@ class OrderRouter:
     async def _refresh_account_after_fill(self) -> None:
         await asyncio.sleep(2)
         try:
-            summary = await self.ibkr_client.get_account_summary()
+            summary = await self.ibkr.get_account_summary()
             if summary:
                 await self.broadcast("account_update", summary)
         except Exception as e:

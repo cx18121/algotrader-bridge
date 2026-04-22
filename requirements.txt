@@ -9,6 +9,6 @@ pydantic>=2.11,<3
 python-dotenv>=1.0,<2
 pytz>=2024.2
 httpx>=0.28,<0.30
-websockets>=14,<16
+websockets>=14,<17
 greenlet>=3.1
 tzdata>=2024.1
