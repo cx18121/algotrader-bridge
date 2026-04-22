@@ -154,8 +154,8 @@
   <div class="statusbar">
     <div class="cell"><div class="label">TWS</div><div class="value" id="s-tws"><span class="dot gray"></span>—</div><div class="small" id="s-tws-detail">—</div></div>
     <div class="cell"><div class="label">Uptime</div><div class="value" id="s-uptime">—</div></div>
-    <div class="cell"><div class="label">Signals (UTC today)</div><div class="value" id="s-signals">—</div></div>
-    <div class="cell"><div class="label">Orders (UTC today)</div><div class="value" id="s-orders">—</div></div>
+    <div class="cell"><div class="label">Signals (ET today)</div><div class="value" id="s-signals">—</div></div>
+    <div class="cell"><div class="label">Orders (ET today)</div><div class="value" id="s-orders">—</div></div>
     <div class="cell"><div class="label">Open Positions</div><div class="value" id="s-positions">—</div></div>
     <div class="cell"><div class="label">Active Intervals</div><div class="value" id="s-intervals">—</div></div>
     <div class="cell"><div class="label">Accepting Signals</div><div class="value" id="s-accepting">—</div></div>
@@ -724,9 +724,19 @@ function renderStatusBar() {
   else if (m.mode === "pre_close") qs("#s-maint").innerHTML = `<span class="dot amber"></span>Pre-close`;
   else qs("#s-maint").innerHTML = `<span class="dot amber"></span>Maintenance`;
 }
-function todayCount(arr, key) {
+function etMidnightMs() {
+  // Returns the UTC ms timestamp of midnight today in America/New_York (DST-aware).
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).formatToParts(now);
+  const get = (t) => parseInt(parts.find(p => p.type === t).value);
+  const msIntoDay = (get("hour") * 3600 + get("minute") * 60 + get("second")) * 1000 + now.getMilliseconds();
+  return now.getTime() - msIntoDay;
+}
+function todayCount(arr, key) {
+  const start = etMidnightMs();
   return arr.filter(r => {
     const t = r[key] ? new Date(r[key]).getTime() : 0;
     return t >= start;
