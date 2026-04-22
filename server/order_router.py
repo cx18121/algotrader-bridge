@@ -129,12 +129,17 @@ class OrderRouter:
 
         # Opposite-direction filled position => close first, then open.
         opp_open = await self._get_open_position(symbol, opp, interval)
+        flipping = False
         if opp_open is not None and opp_open.qty > 0:
             close_action = "SELL" if opp == "long" else "BUY"
             await self._place_close_for_position(signal_id, parsed, opp_open, close_action)
+            flipping = True
 
         # Pre-trade risk checks.
-        err = await self._risk_checks(symbol, direction, interval, qty)
+        # Skip max_open_positions when flipping: the opposing position close was just submitted
+        # but hasn't filled yet, so it still appears open in the DB. Counting it would falsely
+        # block the new entry.
+        err = await self._risk_checks(symbol, direction, interval, qty, skip_open_count=flipping)
         if err is not None:
             await self._reject(signal_id, err)
             return
@@ -736,7 +741,10 @@ class OrderRouter:
             row = res.first()
             return row[0] if row else None
 
-    async def _risk_checks(self, symbol: str, direction: str, interval: Optional[str], qty: int) -> Optional[str]:
+    async def _risk_checks(
+        self, symbol: str, direction: str, interval: Optional[str], qty: int,
+        skip_open_count: bool = False,
+    ) -> Optional[str]:
         cfg = settings()
         # Check 4: max position size (per symbol, interval).
         current = await self._get_open_position(symbol, direction, interval)
@@ -744,7 +752,9 @@ class OrderRouter:
         if cur_qty + qty > cfg.max_position_size:
             return f"exceeds max position size of {cfg.max_position_size} for {symbol}"
         # Check 5: max open positions (only for new positions).
-        if cur_qty == 0:
+        # Skipped when flipping: the opposite-direction close was just submitted but hasn't
+        # filled yet, so that position still appears open and would falsely trigger this limit.
+        if cur_qty == 0 and not skip_open_count:
             async with get_session() as session:
                 res = await session.execute(
                     select(sql_func.count()).select_from(Position).where(Position.qty > 0)

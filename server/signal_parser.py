@@ -36,7 +36,7 @@ _ACTION_META = {
     "long":           ("BUY",  "open",  "long"),   # alias for open_long
     "short":          ("SELL", "open",  "short"),  # alias for open_short
     "l-ts":           ("SELL", "close", "long"),   # long trailing stop fired
-    "s-ts":           ("BUY",  "close", "short"),  # short trailing stop fired
+"s-ts":           ("BUY",  "close", "short"),  # short trailing stop fired
     "kernel_bullish": (None,   None,    None),
     "kernel_bearish": (None,   None,    None),
     "buy":            ("BUY",  None,    None),
@@ -195,6 +195,14 @@ def _parse_plaintext(text: str) -> ParsedSignal:
         raw_action = "kernel_bullish"
     elif "kernel bearish" in lower:
         raw_action = "kernel_bearish"
+    elif "l-ts" in lower:
+        raw_action = "l-ts"
+    elif "s-ts" in lower:
+        raw_action = "s-ts"
+    elif re.search(r"\blong\b", lower):
+        raw_action = "long"
+    elif re.search(r"\bshort\b", lower):
+        raw_action = "short"
 
     if raw_action is None:
         raise SignalParseError(f"could not detect signal type in body: {text!r}")
