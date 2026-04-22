@@ -90,13 +90,13 @@ class OrderRouter:
             await self._reject(signal_id, "TWS disconnected")
             return
 
-        if parsed.raw_action == "open_long":
+        if parsed.raw_action in ("open_long", "long"):
             await self._handle_open(signal_id, parsed, "long", resolved_qty or settings().default_qty, "BUY")
-        elif parsed.raw_action == "open_short":
+        elif parsed.raw_action in ("open_short", "short"):
             await self._handle_open(signal_id, parsed, "short", resolved_qty or settings().default_qty, "SELL")
-        elif parsed.raw_action == "close_long":
+        elif parsed.raw_action in ("close_long", "l-ts"):
             await self._handle_close(signal_id, parsed, "long", "SELL")
-        elif parsed.raw_action == "close_short":
+        elif parsed.raw_action in ("close_short", "s-ts"):
             await self._handle_close(signal_id, parsed, "short", "BUY")
         else:
             log.info("router_skip_nonrouted", extra={"signal_id": signal_id, "raw_action": parsed.raw_action})

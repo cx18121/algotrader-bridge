@@ -118,14 +118,14 @@ async def _find_recent_unclosed_open(symbol: str) -> Optional[Signal]:
             select(Signal)
             .where(Signal.symbol == symbol)
             .where(Signal.status == "accepted")
-            .where(Signal.raw_action.in_(("open_long", "open_short", "close_long", "close_short")))
+            .where(Signal.raw_action.in_(("open_long", "open_short", "close_long", "close_short", "long", "short", "l-ts", "s-ts")))
             .order_by(Signal.received_at.desc())
             .limit(1)
         )
         last = (await session.execute(stmt)).scalar_one_or_none()
     if last is None:
         return None
-    if last.raw_action in ("open_long", "open_short"):
+    if last.raw_action in ("open_long", "open_short", "long", "short"):
         return last
     return None
 
@@ -294,7 +294,7 @@ async def handle_webhook(
 
     # --- Short-signal toggle ---
     if (
-        parsed.raw_action == "open_short"
+        parsed.raw_action in ("open_short", "short")
         and settings().ignore_short_signals
     ):
         sig_id = await _persist_signal(
