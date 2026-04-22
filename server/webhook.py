@@ -164,7 +164,7 @@ async def _resolve_generic_action(parsed: ParsedSignal) -> Optional[str]:
         # opposite direction would silently flip intent. Reject instead.
         recent_open = await _find_recent_unclosed_open(parsed.symbol)
         if recent_open is not None:
-            recent_dir = "long" if recent_open.raw_action == "open_long" else "short"
+            recent_dir = "long" if recent_open.raw_action in ("open_long", "long") else "short"
             if (raw == "buy" and recent_dir == "short") or (raw == "sell" and recent_dir == "long"):
                 return (
                     f"{raw!r} signal conflicts with recent unresolved "
