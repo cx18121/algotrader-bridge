@@ -109,89 +109,27 @@ async def _push_signal(sig_id: int, parsed_or_none, status_: str, reason: Option
         log.warning("signal_broadcast_failed", extra={"signal_id": sig_id, "error": str(e)})
 
 
-async def _find_recent_unclosed_open(symbol: str) -> Optional[Signal]:
-    """Return the most recent accepted open_* Signal for `symbol` that has no
-    matching close after it. Used to detect a failed/pending entry whose order
-    never produced a Position row, so a follow-up generic alert in the opposite
-    direction can be rejected instead of silently flipping intent."""
-    async with get_session() as session:
-        stmt = (
-            select(Signal)
-            .where(Signal.symbol == symbol)
-            .where(Signal.status == "accepted")
-            .where(Signal.raw_action.in_(("open_long", "open_short", "close_long", "close_short", "long", "short", "l-ts", "s-ts")))
-            .order_by(Signal.received_at.desc())
-            .limit(1)
-        )
-        last = (await session.execute(stmt)).scalar_one_or_none()
-    if last is None:
-        return None
-    if last.raw_action in ("open_long", "open_short", "long", "short"):
-        return last
-    return None
-
 
 async def _resolve_generic_action(parsed: ParsedSignal) -> Optional[str]:
-    """Resolve generic Pine strategy 'buy'/'sell' actions to concrete directional actions
-    using current DB position state. Mutates `parsed` in place.
+    """Resolve generic Pine strategy 'buy'/'sell' to open_long/open_short.
 
-    Under one-position-at-a-time semantics:
-      buy  + flat           -> open_long
-      sell + flat           -> open_short
-      sell + long position  -> close_long
-      buy  + short position -> close_short
-      buy  + long position  -> error (would be pyramid/duplicate entry)
-      sell + short position -> error (would be pyramid/duplicate entry)
-
-    Returns a rejection reason string on ambiguous/invalid state, else None.
+    'buy' always means open_long; 'sell' always means open_short.
+    Position flipping (closing the opposing side first) is handled by the order
+    router's _handle_open, which already closes any opposite-direction position
+    before placing the new entry. Explicit closes always use s-ts/l-ts/close_long/
+    close_short signals — never generic buy/sell.
     """
     if parsed.raw_action not in GENERIC_ACTIONS:
         return None
 
-    async with get_session() as session:
-        stmt = (
-            select(Position)
-            .where(Position.symbol == parsed.symbol)
-            .where(Position.qty > 0)
-            .limit(1)
-        )
-        res = await session.execute(stmt)
-        pos = res.scalar_one_or_none()
-
     raw = parsed.raw_action
-    if pos is None:
-        # No actual position — but a prior accepted open may have failed to fill
-        # (e.g. contract unresolvable on IBKR). If so, a generic action in the
-        # opposite direction would silently flip intent. Reject instead.
-        recent_open = await _find_recent_unclosed_open(parsed.symbol)
-        if recent_open is not None:
-            recent_dir = "long" if recent_open.raw_action in ("open_long", "long") else "short"
-            if (raw == "buy" and recent_dir == "short") or (raw == "sell" and recent_dir == "long"):
-                return (
-                    f"{raw!r} signal conflicts with recent unresolved "
-                    f"{recent_open.raw_action} (signal id={recent_open.id}) on {parsed.symbol}"
-                )
-        resolved = "open_long" if raw == "buy" else "open_short"
-    elif pos.direction == "long":
-        if raw == "sell":
-            resolved = "close_long"
-        else:
-            return f"{raw!r} signal received while long position already open for {parsed.symbol}"
-    else:  # short
-        if raw == "buy":
-            resolved = "close_short"
-        else:
-            return f"{raw!r} signal received while short position already open for {parsed.symbol}"
+    resolved = "open_long" if raw == "buy" else "open_short"
 
     side, pos_action, direction = _ACTION_META[resolved]
     parsed.raw_action = resolved
     parsed.order_side = side
     parsed.position_action = pos_action
     parsed.direction = direction
-    # For resolved closes, align interval with the position's interval so the
-    # downstream (symbol, direction, interval) position lookup matches.
-    if pos_action == "close" and pos is not None and pos.interval:
-        parsed.interval = pos.interval
     return None
 
 
