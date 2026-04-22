@@ -143,12 +143,24 @@ class Settings:
     # Account
     account_snapshot_interval_seconds: int = 300
 
-    # Maintenance window
+    # Maintenance window — primary nightly
     maintenance_window_enabled: bool = True
     maintenance_window_start: str = "23:45"
     maintenance_window_end: str = "00:15"
     maintenance_close_minutes_before: int = 5
     maintenance_timezone: str = "America/New_York"
+
+    # Maintenance window 2 — secondary daily (e.g. 17:00–18:00)
+    maintenance_window_2_enabled: bool = False
+    maintenance_window_2_start: str = "17:00"
+    maintenance_window_2_end: str = "18:00"
+
+    # Maintenance weekend window (e.g. Fri 16:00 – Sun 17:00)
+    maintenance_weekend_enabled: bool = False
+    maintenance_weekend_start_day: str = "friday"
+    maintenance_weekend_start_time: str = "16:00"
+    maintenance_weekend_end_day: str = "sunday"
+    maintenance_weekend_end_time: str = "17:00"
 
     # Contract mapping: per-symbol overrides for IBKR contract resolution.
     # Keys are base symbols (TV continuous-future suffixes like "1!"/"2!" are stripped
@@ -311,6 +323,14 @@ def load_settings() -> Settings:
         maintenance_window_end=os.getenv("MAINTENANCE_WINDOW_END", "00:15"),
         maintenance_close_minutes_before=_env_int("MAINTENANCE_CLOSE_MINUTES_BEFORE", 5),
         maintenance_timezone=os.getenv("MAINTENANCE_TIMEZONE", "America/New_York"),
+        maintenance_window_2_enabled=_env_bool("MAINTENANCE_WINDOW_2_ENABLED", False),
+        maintenance_window_2_start=os.getenv("MAINTENANCE_WINDOW_2_START", "17:00"),
+        maintenance_window_2_end=os.getenv("MAINTENANCE_WINDOW_2_END", "18:00"),
+        maintenance_weekend_enabled=_env_bool("MAINTENANCE_WEEKEND_ENABLED", False),
+        maintenance_weekend_start_day=os.getenv("MAINTENANCE_WEEKEND_START_DAY", "friday"),
+        maintenance_weekend_start_time=os.getenv("MAINTENANCE_WEEKEND_START_TIME", "16:00"),
+        maintenance_weekend_end_day=os.getenv("MAINTENANCE_WEEKEND_END_DAY", "sunday"),
+        maintenance_weekend_end_time=os.getenv("MAINTENANCE_WEEKEND_END_TIME", "17:00"),
         contract_map=contract_map,
     )
 
