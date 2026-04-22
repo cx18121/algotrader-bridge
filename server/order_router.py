@@ -497,9 +497,14 @@ class OrderRouter:
                 order.status = "partially_filled"
 
             # Slippage calc for any signal-driven order at full fill (entry or exit).
+            # Positive = good (favorable fill), negative = bad (unfavorable fill).
+            # Long entry: want lower fill → signal - fill; Short entry: want higher fill → fill - signal.
+            # Exits are the mirror: Long exit (sell) wants higher fill; Short exit (buy) wants lower fill.
             just_became_filled = (order.status == "filled")
             if just_became_filled and order.signal_close_price:
-                order.fill_deviation_pts = new_avg - order.signal_close_price
+                direction_mult = -1.0 if order.direction == "long" else 1.0
+                role_mult = -1.0 if order.order_role in ("exit", "trail_stop") else 1.0
+                order.fill_deviation_pts = (new_avg - order.signal_close_price) * direction_mult * role_mult
                 order.fill_deviation_pct = (order.fill_deviation_pts / order.signal_close_price) * 100.0
                 log.info(
                     "slippage_calculated",
