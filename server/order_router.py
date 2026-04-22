@@ -482,6 +482,28 @@ class OrderRouter:
                 return
 
             # Known order: append to fills, update aggregate.
+            # Cap fill_qty to the order's remaining unfilled quantity.
+            # During position flips IBKR may report a combined execution (close old +
+            # open new) as a single fill against the entry order, overstating fill_qty.
+            already_filled = order.fill_qty or 0
+            remaining = max(0, order.qty - already_filled)
+            if fill_qty > remaining:
+                log.warning(
+                    "fill_qty_capped",
+                    extra={
+                        "order_id": order.id,
+                        "reported_fill_qty": fill_qty,
+                        "order_qty": order.qty,
+                        "already_filled": already_filled,
+                        "capped_to": remaining,
+                    },
+                )
+                fill_qty = remaining
+
+            if fill_qty == 0:
+                await session.commit()
+                return
+
             fill = Fill(
                 order_id=order.id,
                 ibkr_exec_id=ibkr_exec_id,
@@ -494,7 +516,7 @@ class OrderRouter:
             )
             session.add(fill)
 
-            new_total = (order.fill_qty or 0) + fill_qty
+            new_total = already_filled + fill_qty
             # Weighted avg fill price.
             if order.fill_price and order.fill_qty:
                 new_avg = ((order.fill_price * order.fill_qty) + (fill_price * fill_qty)) / new_total
