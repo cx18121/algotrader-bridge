@@ -335,6 +335,9 @@ class OrderRouter:
                 created_at=now,
             )
             session.add(o)
+            sig = await session.get(Signal, signal_id)
+            if sig is not None and sig.qty is None:
+                sig.qty = qty
             await session.commit()
             await session.refresh(o)
             order_id = o.id
