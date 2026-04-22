@@ -247,7 +247,7 @@ class MaintenanceScheduler:
         webhook_module.set_accepting_signals(False)
         self.mode = "maintenance"
         self.resumes_at = window_end_utc.isoformat()
-        self.message = f"MAINTENANCE MODE — No orders will be accepted until {self.resumes_at}"
+        self.message = "No orders will be accepted."
         log.info("maintenance_window_start")
         await self._broadcast_status()
 
