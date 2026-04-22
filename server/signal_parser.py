@@ -111,6 +111,13 @@ def _try_parse_json(text: str) -> Optional[ParsedSignal]:
     if not isinstance(payload, dict):
         return None
     action = payload.get("action")
+    # signal_id (e.g. "L-TS", "S-TS", "Long") takes precedence over a generic
+    # action ("buy"/"sell") when it maps to a recognized action type.
+    signal_id = payload.get("signal_id")
+    if signal_id and isinstance(signal_id, str):
+        sid = signal_id.strip().lower()
+        if sid in VALID_ACTIONS:
+            action = sid
     if not isinstance(action, str):
         return None
     action = action.strip().lower()
