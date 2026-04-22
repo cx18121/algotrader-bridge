@@ -116,9 +116,11 @@ class OrderRouter:
 
         # Filled same-direction position => close it first, then open a new one.
         open_pos = await self._get_open_position(symbol, direction, interval)
+        re_entering = False
         if open_pos is not None and open_pos.qty > 0:
             close_action = "SELL" if direction == "long" else "BUY"
             await self._place_close_for_position(signal_id, parsed, open_pos, close_action)
+            re_entering = True
             log.info("same_direction_flip", extra={"symbol": symbol, "direction": direction, "qty": open_pos.qty})
 
         # Opposite-direction in-flight => cancel + close partial, then proceed.
@@ -136,10 +138,15 @@ class OrderRouter:
             flipping = True
 
         # Pre-trade risk checks.
-        # Skip max_open_positions when flipping: the opposing position close was just submitted
-        # but hasn't filled yet, so it still appears open in the DB. Counting it would falsely
-        # block the new entry.
-        err = await self._risk_checks(symbol, direction, interval, qty, skip_open_count=flipping)
+        # skip_open_count: opposite-direction close was just submitted but not yet filled,
+        #   so it still appears open in the DB — don't count it against max_open_positions.
+        # re_entering: same-direction close was just submitted but not yet filled,
+        #   so cur_qty would double-count the being-closed position — check qty alone.
+        err = await self._risk_checks(
+            symbol, direction, interval, qty,
+            skip_open_count=flipping,
+            re_entering=re_entering,
+        )
         if err is not None:
             await self._reject(signal_id, err)
             return
@@ -744,12 +751,16 @@ class OrderRouter:
     async def _risk_checks(
         self, symbol: str, direction: str, interval: Optional[str], qty: int,
         skip_open_count: bool = False,
+        re_entering: bool = False,
     ) -> Optional[str]:
         cfg = settings()
         # Check 4: max position size (per symbol, interval).
         current = await self._get_open_position(symbol, direction, interval)
         cur_qty = current.qty if current else 0
-        if cur_qty + qty > cfg.max_position_size:
+        # When re-entering (same-direction close just submitted, not yet filled), the old
+        # position still appears open in the DB. Check new qty alone, not cur + new.
+        effective_qty = qty if re_entering else cur_qty + qty
+        if effective_qty > cfg.max_position_size:
             return f"exceeds max position size of {cfg.max_position_size} for {symbol}"
         # Check 5: max open positions (only for new positions).
         # Skipped when flipping: the opposite-direction close was just submitted but hasn't
