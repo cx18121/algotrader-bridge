@@ -291,7 +291,7 @@
   <table id="ct-table">
     <thead><tr>
       <th>Opened</th><th>Closed</th><th>Duration</th><th>Symbol</th><th>Interval</th>
-      <th>Dir</th><th>Qty</th><th>Avg Entry</th><th>Realized P&amp;L</th><th>P&amp;L / unit</th>
+      <th>Dir</th><th>Qty</th><th>Avg Entry</th><th>Realized P&amp;L</th><th>P&amp;L / unit</th><th>Signal P&amp;L</th>
     </tr></thead>
     <tbody></tbody>
   </table>
@@ -1229,7 +1229,7 @@ function renderClosedTrades() {
 
   renderPnlChart(rows);
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="empty">No closed trades yet.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="empty">No closed trades yet.</td></tr>`;
     return;
   }
   tbody.innerHTML = rows.map(p => {
@@ -1244,6 +1244,9 @@ function renderClosedTrades() {
       ? fmtDuration(new Date(p.closed_at) - new Date(p.opened_at))
       : "—";
     const dirPill = `<span class="pill ${p.direction === "long" ? "green" : "red"}">${escapeHtml((p.direction || "").toUpperCase())}</span>`;
+    const sigPnl = (p.signal_entry_price != null && p.signal_close_price != null && p.qty != null)
+      ? p.qty * (p.signal_close_price - p.signal_entry_price) * (p.direction === "long" ? 1 : -1)
+      : null;
     return `<tr>
       <td>${fmtDateTime(p.opened_at)}</td>
       <td>${fmtDateTime(p.closed_at)}</td>
@@ -1255,6 +1258,7 @@ function renderClosedTrades() {
       <td>${fmtUsd(p.avg_cost)}</td>
       <td class="${pnlCls}" style="font-weight:700;font-size:13px;">${fmtUsd(pnl)}</td>
       <td class="${perUnit == null ? "" : perUnit >= 0 ? "pos" : "neg"}">${perUnit != null ? fmtUsd(perUnit) : "—"}</td>
+      <td class="${sigPnl == null ? "" : sigPnl >= 0 ? "pos" : "neg"}">${sigPnl != null ? fmtUsd(sigPnl) : "—"}</td>
     </tr>`;
   }).join("");
 }
