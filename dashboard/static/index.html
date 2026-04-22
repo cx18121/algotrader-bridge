@@ -4,6 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>AlgoTrader Bridge</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 <style>
   :root {
     --bg: #0b0f14;
@@ -293,6 +294,15 @@
     <tbody></tbody>
   </table>
   </div>
+</section>
+
+<!-- Panel: P&L Chart -->
+<section class="panel">
+  <header>
+    <h2>Cumulative Realized P&amp;L</h2>
+    <span class="small" style="color:var(--muted);">Filtered with Closed Trades</span>
+  </header>
+  <canvas id="pnl-chart" height="80"></canvas>
 </section>
 
 <!-- Panel 6 + Panel 7 -->
@@ -907,6 +917,77 @@ async function loadSlippage() {
   }
 }
 
+// ---------- P&L chart ----------
+let _pnlChart = null;
+function renderPnlChart(rows) {
+  // rows already filtered + sorted desc by server; reverse to get asc by close time
+  const sorted = rows.slice().sort((a, b) => new Date(a.closed_at) - new Date(b.closed_at));
+  const labels = [], data = [];
+  let cum = 0;
+  for (const t of sorted) {
+    if (t.closed_at == null || t.realized_pnl == null) continue;
+    cum += t.realized_pnl;
+    labels.push(fmtDateTime(t.closed_at));
+    data.push(parseFloat(cum.toFixed(2)));
+  }
+
+  const ctx = qs("#pnl-chart").getContext("2d");
+  const finalVal = data.length ? data[data.length - 1] : 0;
+  const lineColor = finalVal >= 0 ? "#3ecf8e" : "#ef5b5b";
+  const fillColor = finalVal >= 0 ? "rgba(62,207,142,0.12)" : "rgba(239,91,91,0.12)";
+
+  if (_pnlChart) {
+    _pnlChart.data.labels = labels;
+    _pnlChart.data.datasets[0].data = data;
+    _pnlChart.data.datasets[0].borderColor = lineColor;
+    _pnlChart.data.datasets[0].backgroundColor = fillColor;
+    _pnlChart.update();
+    return;
+  }
+
+  _pnlChart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        data,
+        borderColor: lineColor,
+        backgroundColor: fillColor,
+        borderWidth: 2,
+        pointRadius: data.length < 60 ? 3 : 0,
+        pointHoverRadius: 5,
+        fill: true,
+        tension: 0.3,
+      }],
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => " $" + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: "#7b8797", maxTicksLimit: 8, maxRotation: 0 },
+          grid: { color: "#1f2a37" },
+        },
+        y: {
+          ticks: {
+            color: "#7b8797",
+            callback: (v) => "$" + v.toLocaleString(),
+          },
+          grid: { color: "#1f2a37" },
+        },
+      },
+    },
+  });
+}
+
 // ---------- warnings ----------
 function pushWarning(w) {
   state.warnings.unshift({ id: Math.random().toString(36).slice(2), ...w });
@@ -1073,6 +1154,7 @@ function renderClosedTrades() {
   totalEl.textContent = fmtUsd(totalPnl);
   totalEl.className = totalPnl >= 0 ? "pos" : "neg";
 
+  renderPnlChart(rows);
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="10" class="empty">No closed trades yet.</td></tr>`;
     return;
