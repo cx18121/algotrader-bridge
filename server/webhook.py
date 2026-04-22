@@ -187,17 +187,9 @@ async def handle_webhook(
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return WebhookResponse(status="maintenance", reason="server in maintenance")
 
-    # --- Resolve generic buy/sell (Pine strategy.order.action) against position state ---
+    # --- Resolve generic buy/sell to open_long/open_short ---
     if parsed.raw_action in GENERIC_ACTIONS:
-        reject_reason = await _resolve_generic_action(parsed)
-        if reject_reason is not None:
-            sig_id = await _persist_signal(
-                parsed, body, source_ip, status_="rejected", qty=None,
-                reject_reason=reject_reason,
-            )
-            log.warning("generic_action_unresolvable", extra={"signal_id": sig_id, "reason": reject_reason})
-            await _push_signal(sig_id, parsed, "rejected", reason=reject_reason)
-            return WebhookResponse(status="rejected", signal_id=sig_id, reason=reject_reason)
+        await _resolve_generic_action(parsed)
         log.info(
             "generic_action_resolved",
             extra={"symbol": parsed.symbol, "resolved_to": parsed.raw_action, "interval": parsed.interval},
