@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>AlgoTrader Bridge</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2/dist/chartjs-plugin-zoom.min.js"></script>
 <style>
   :root {
     --bg: #0b0f14;
@@ -50,6 +52,8 @@
   th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
   th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; background: var(--panel-alt); position: sticky; top: 0; }
   tr.flash td { background: rgba(74, 163, 255, .08); transition: background 1200ms ease-out; }
+  @keyframes row-highlight { from { background: rgba(242,177,71,.35); } to { background: transparent; } }
+  tr.chart-highlight td { animation: row-highlight 1.8s ease-out forwards; }
   tbody tr:hover td { background: var(--panel-alt); }
   .empty { color: var(--muted); font-style: italic; padding: 12px; text-align: center; }
 
@@ -102,6 +106,8 @@
   @media (max-width: 1280px) { .panels-grid, .two-col { grid-template-columns: 1fr; } }
 
   .scroll-x { overflow-x: auto; }
+  .table-scroll { overflow: auto; max-height: 420px; }
+  .table-scroll th { z-index: 1; }
   .slippage-global { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 10px; }
   @media (max-width: 900px) { .slippage-global { grid-template-columns: repeat(3, 1fr); } }
   @media (max-width: 640px) { .slippage-global { grid-template-columns: repeat(2, 1fr); } }
@@ -227,7 +233,7 @@
         </select>
       </div>
     </header>
-    <div class="scroll-x">
+    <div class="table-scroll" id="sig-scroll">
     <table id="sig-table">
       <thead><tr>
         <th>Time</th><th>Symbol</th><th>Interval</th><th>Action</th><th>Dir</th><th>Qty</th>
@@ -235,6 +241,7 @@
       </tr></thead>
       <tbody></tbody>
     </table>
+    <div id="sig-sentinel" style="height:1px"></div>
     </div>
   </section>
 
@@ -261,7 +268,7 @@
         </select>
       </div>
     </header>
-    <div class="scroll-x">
+    <div class="table-scroll" id="ord-scroll">
     <table id="ord-table">
       <thead><tr>
         <th>Time</th><th>Symbol</th><th>Interval</th><th>Action</th><th>Qty</th>
@@ -270,6 +277,7 @@
       </tr></thead>
       <tbody></tbody>
     </table>
+    <div id="ord-sentinel" style="height:1px"></div>
     </div>
   </section>
 </div>
@@ -280,6 +288,7 @@
     <h2>Closed Trades <span class="count-badge" id="ct-count">0</span> <span style="font-size:13px;font-weight:400;color:var(--muted);">(<span id="ct-wins" class="pos">0W</span> / <span id="ct-losses" class="neg">0L</span>)</span></h2>
     <div style="display:flex;align-items:center;gap:16px;">
       <span class="small">Total realized P&amp;L: <b id="ct-total-pnl" style="font-size:13px;">—</b></span>
+      <span class="small">Signal P&amp;L: <b id="ct-total-signal-pnl" style="font-size:13px;">—</b></span>
       <div class="filters">
         <input id="ct-f-symbol" placeholder="Symbol" size="6" />
         <select id="ct-f-interval"><option value="">All intervals</option></select>
@@ -302,7 +311,10 @@
 <section class="panel">
   <header>
     <h2>Cumulative Realized P&amp;L</h2>
-    <span class="small" style="color:var(--muted);">Filtered with Closed Trades</span>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span class="small" style="color:var(--muted);">Filtered with Closed Trades · scroll to zoom · drag to pan · click point to jump to row</span>
+      <button onclick="_pnlChart && _pnlChart.resetZoom()" style="font-size:11px;padding:2px 8px;">Reset Zoom</button>
+    </div>
   </header>
   <canvas id="pnl-chart" height="80"></canvas>
 </section>
@@ -311,7 +323,10 @@
 <section class="panel">
   <header>
     <h2>Cumulative Signal P&amp;L</h2>
-    <span class="small" style="color:var(--muted);">Based on TradingView prices — trades without signal prices omitted</span>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span class="small" style="color:var(--muted);">Based on TradingView prices — trades without signal prices omitted</span>
+      <button onclick="_signalPnlChart && _signalPnlChart.resetZoom()" style="font-size:11px;padding:2px 8px;">Reset Zoom</button>
+    </div>
   </header>
   <canvas id="signal-pnl-chart" height="80"></canvas>
 </section>
@@ -408,10 +423,18 @@ const state = {
   stale: false,       // tws disconnected
   startTime: null,    // approximated from first snapshot
   uptimeSeconds: 0,
+  sigCountToday: 0,
+  ordCountToday: 0,
 };
 
 const intervalsSeen = new Set();
 const seenInitialSignalsToday = { set: null, ts: null }; // for uptime derivation
+
+const PAGE_SIZE = 100;
+const paging = {
+  sig: { offset: 0, loading: false, hasMore: true },
+  ord: { offset: 0, loading: false, hasMore: true },
+};
 
 // ---------- helpers ----------
 const qs = (s) => document.querySelector(s);
@@ -560,8 +583,6 @@ function handleMessage(msg) {
 
 // ---------- snapshot ----------
 function applySnapshot(d) {
-  state.signals = Array.isArray(d.signals) ? d.signals.slice(0, 100) : [];
-  state.orders = Array.isArray(d.orders) ? d.orders.slice(0, 100) : [];
   state.positions = Array.isArray(d.positions) ? d.positions : [];
   state.account = d.account || null;
   state.tws = d.tws_status || state.tws;
@@ -569,10 +590,11 @@ function applySnapshot(d) {
   state.accepting = !!d.accepting_signals;
   state.stale = !state.tws.connected;
 
-  state.signals.forEach(s => { if (s.interval) intervalsSeen.add(s.interval); });
   state.positions.forEach(p => { if (p.interval) intervalsSeen.add(p.interval); });
   refreshIntervalOptions();
 
+  fetchSignals(true);
+  fetchOrders(true);
   renderAll();
 }
 
@@ -580,27 +602,9 @@ function applySnapshot(d) {
 let sigTimer = null, ordTimer = null, posTimer = null;
 function scheduleRefresh(kind) {
   if (kind === "signals" && !sigTimer) {
-    sigTimer = setTimeout(async () => {
-      sigTimer = null;
-      try {
-        const rows = await apiFetch("/api/signals?limit=100");
-        state.signals = rows;
-        rows.forEach(s => { if (s.interval) intervalsSeen.add(s.interval); });
-        refreshIntervalOptions();
-        renderSignals();
-      } catch (e) { /* stay quiet; ws still works */ }
-    }, 150);
+    sigTimer = setTimeout(() => { sigTimer = null; fetchSignals(true); }, 150);
   } else if (kind === "orders" && !ordTimer) {
-    ordTimer = setTimeout(async () => {
-      ordTimer = null;
-      try {
-        const rows = await apiFetch("/api/orders?limit=100");
-        state.orders = rows;
-        rows.forEach(o => { if (o.interval) intervalsSeen.add(o.interval); });
-        refreshIntervalOptions();
-        renderOrders();
-      } catch (e) { /* quiet */ }
-    }, 150);
+    ordTimer = setTimeout(() => { ordTimer = null; fetchOrders(true); }, 150);
   } else if (kind === "positions" && !posTimer) {
     posTimer = setTimeout(async () => {
       posTimer = null;
@@ -686,6 +690,73 @@ function onOrphanTrail(d, ts) {
   });
 }
 
+// ---------- server-side paging for signals / orders ----------
+function sigServerParams(offset) {
+  const p = new URLSearchParams();
+  const sym = qs("#sig-f-symbol").value.trim();
+  const ivl = qs("#sig-f-interval").value;
+  const act = qs("#sig-f-action").value;
+  const st  = qs("#sig-f-status").value;
+  if (sym) p.set("symbol", sym.toUpperCase());
+  if (ivl) p.set("interval", ivl);
+  if (act) p.set("raw_action", act);
+  if (st)  p.set("status", st);
+  p.set("limit", PAGE_SIZE);
+  p.set("offset", offset);
+  return p.toString();
+}
+
+function ordServerParams(offset) {
+  const p = new URLSearchParams();
+  const sym = qs("#ord-f-symbol").value.trim();
+  const ivl = qs("#ord-f-interval").value;
+  const role = qs("#ord-f-role").value;
+  const st  = qs("#ord-f-status").value;
+  if (sym) p.set("symbol", sym.toUpperCase());
+  if (ivl) p.set("interval", ivl);
+  if (role) p.set("order_role", role);
+  if (st)  p.set("status", st);
+  p.set("limit", PAGE_SIZE);
+  p.set("offset", offset);
+  return p.toString();
+}
+
+async function fetchSignals(reset) {
+  const pg = paging.sig;
+  if (pg.loading) return;
+  if (!reset && !pg.hasMore) return;
+  if (reset) { pg.offset = 0; pg.hasMore = true; state.signals = []; }
+  pg.loading = true;
+  try {
+    const rows = await apiFetch("/api/signals?" + sigServerParams(pg.offset));
+    rows.forEach(s => { if (s.interval) intervalsSeen.add(s.interval); });
+    state.signals = reset ? rows : [...state.signals, ...rows];
+    pg.offset += rows.length;
+    pg.hasMore = rows.length === PAGE_SIZE;
+    refreshIntervalOptions();
+    renderSignals();
+  } catch (_) {}
+  pg.loading = false;
+}
+
+async function fetchOrders(reset) {
+  const pg = paging.ord;
+  if (pg.loading) return;
+  if (!reset && !pg.hasMore) return;
+  if (reset) { pg.offset = 0; pg.hasMore = true; state.orders = []; }
+  pg.loading = true;
+  try {
+    const rows = await apiFetch("/api/orders?" + ordServerParams(pg.offset));
+    rows.forEach(o => { if (o.interval) intervalsSeen.add(o.interval); });
+    state.orders = reset ? rows : [...state.orders, ...rows];
+    pg.offset += rows.length;
+    pg.hasMore = rows.length === PAGE_SIZE;
+    refreshIntervalOptions();
+    renderOrders();
+  } catch (_) {}
+  pg.loading = false;
+}
+
 // ---------- render: banners ----------
 function renderMaintenanceBanner() {
   if (state.maintenance.mode === "normal") {
@@ -712,8 +783,8 @@ function renderStatusBar() {
   qs("#s-uptime").textContent = fmtSec(state.uptimeSeconds);
 
   // Counts
-  qs("#s-signals").textContent = fmtInt(todayCount(state.signals, "received_at"));
-  qs("#s-orders").textContent = fmtInt(todayCount(state.orders, "created_at"));
+  qs("#s-signals").textContent = fmtInt(state.sigCountToday);
+  qs("#s-orders").textContent = fmtInt(state.ordCountToday);
   qs("#s-positions").textContent = fmtInt(state.positions.length);
 
   // Active intervals
@@ -815,18 +886,8 @@ function renderPositions() {
 // ---------- render: signals ----------
 function renderSignals() {
   const tbody = qs("#sig-table tbody");
-  const sym = qs("#sig-f-symbol").value.trim().toUpperCase();
-  const ivl = qs("#sig-f-interval").value;
-  const act = qs("#sig-f-action").value;
-  const st  = qs("#sig-f-status").value;
   const fmt = qs("#sig-f-format").value;
-  const rows = state.signals.filter(s =>
-    (!sym || (s.symbol || "").toUpperCase().includes(sym)) &&
-    (!ivl || s.interval === ivl) &&
-    (!act || s.raw_action === act) &&
-    (!st  || s.status === st) &&
-    (!fmt || s.parse_format === fmt)
-  ).slice(0, 100);
+  const rows = fmt ? state.signals.filter(s => s.parse_format === fmt) : state.signals;
   qs("#sig-count").textContent = rows.length;
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="11" class="empty">No signals.</td></tr>`;
@@ -850,18 +911,8 @@ function renderSignals() {
 // ---------- render: orders ----------
 function renderOrders() {
   const tbody = qs("#ord-table tbody");
-  const sym = qs("#ord-f-symbol").value.trim().toUpperCase();
-  const ivl = qs("#ord-f-interval").value;
-  const role = qs("#ord-f-role").value;
   const typ = qs("#ord-f-type").value;
-  const st  = qs("#ord-f-status").value;
-  const rows = state.orders.filter(o =>
-    (!sym || (o.symbol || "").toUpperCase().includes(sym)) &&
-    (!ivl || o.interval === ivl) &&
-    (!role || o.order_role === role) &&
-    (!typ || o.order_type === typ) &&
-    (!st || o.status === st)
-  ).slice(0, 100);
+  const rows = typ ? state.orders.filter(o => o.order_type === typ) : state.orders;
   qs("#ord-count").textContent = rows.length;
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="13" class="empty">No orders.</td></tr>`;
@@ -942,9 +993,42 @@ async function loadSlippage() {
 
 // ---------- P&L chart ----------
 let _pnlChart = null, _signalPnlChart = null;
+let _pnlChartRows = [], _signalPnlChartRows = [];
+
+function _makeChartOpts(tooltipLabel, onClickFn) {
+  return {
+    responsive: true,
+    animation: false,
+    onClick: onClickFn,
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: tooltipLabel } },
+      zoom: {
+        zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: "x" },
+        pan: { enabled: true, mode: "x" },
+      },
+    },
+    scales: {
+      x: { ticks: { color: "#7b8797", maxTicksLimit: 8, maxRotation: 0 }, grid: { color: "#1f2a37" } },
+      y: { ticks: { color: "#7b8797", callback: (v) => "$" + v.toLocaleString() }, grid: { color: "#1f2a37" } },
+    },
+  };
+}
+
+function _jumpToTradeRow(trade) {
+  if (!trade || !trade.closed_at) return;
+  const row = document.querySelector(`#ct-table tr[data-closed-at="${trade.closed_at}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior: "smooth", block: "center" });
+  row.classList.remove("chart-highlight");
+  void row.offsetWidth; // reflow to restart animation
+  row.classList.add("chart-highlight");
+}
+
 function renderPnlChart(rows) {
-  // rows already filtered + sorted desc by server; reverse to get asc by close time
+  // Realized P&L chart
   const sorted = rows.slice().sort((a, b) => new Date(a.closed_at) - new Date(b.closed_at));
+  _pnlChartRows = sorted;
   const labels = [], data = [];
   let cum = 0;
   for (const t of sorted) {
@@ -953,110 +1037,48 @@ function renderPnlChart(rows) {
     labels.push(fmtDateTime(t.closed_at));
     data.push(parseFloat(cum.toFixed(2)));
   }
-
-  const ctx = qs("#pnl-chart").getContext("2d");
   const finalVal = data.length ? data[data.length - 1] : 0;
   const lineColor = finalVal >= 0 ? "#3ecf8e" : "#ef5b5b";
   const fillColor = finalVal >= 0 ? "rgba(62,207,142,0.12)" : "rgba(239,91,91,0.12)";
 
-  if (_pnlChart) {
-    _pnlChart.data.labels = labels;
-    _pnlChart.data.datasets[0].data = data;
-    _pnlChart.data.datasets[0].borderColor = lineColor;
-    _pnlChart.data.datasets[0].backgroundColor = fillColor;
-    _pnlChart.update();
-  } else {
-    _pnlChart = new Chart(ctx, {
-      type: "line",
-      data: {
-        labels,
-        datasets: [{
-          data,
-          borderColor: lineColor,
-          backgroundColor: fillColor,
-          borderWidth: 2,
-          pointRadius: data.length < 60 ? 3 : 0,
-          pointHoverRadius: 5,
-          fill: true,
-          tension: 0.3,
-        }],
-      },
-      options: {
-        responsive: true,
-        animation: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => " $" + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            },
-          },
-        },
-        scales: {
-          x: { ticks: { color: "#7b8797", maxTicksLimit: 8, maxRotation: 0 }, grid: { color: "#1f2a37" } },
-          y: { ticks: { color: "#7b8797", callback: (v) => "$" + v.toLocaleString() }, grid: { color: "#1f2a37" } },
-        },
-      },
-    });
-  }
+  if (_pnlChart) { _pnlChart.destroy(); }
+  _pnlChart = new Chart(qs("#pnl-chart").getContext("2d"), {
+    type: "line",
+    data: { labels, datasets: [{ data, borderColor: lineColor, backgroundColor: fillColor,
+      borderWidth: 2, pointRadius: data.length < 60 ? 3 : 0, pointHoverRadius: 5, fill: true, tension: 0 }] },
+    options: _makeChartOpts(
+      (ctx) => " $" + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      (_, elements) => { if (elements.length) _jumpToTradeRow(_pnlChartRows[elements[0].index]); }
+    ),
+  });
 
   // Signal P&L chart
   const sigSorted = rows.slice()
     .filter(t => t.closed_at != null && t.signal_entry_price != null && t.signal_close_price != null)
     .sort((a, b) => new Date(a.closed_at) - new Date(b.closed_at));
+  _signalPnlChartRows = sigSorted;
   const sigLabels = [], sigData = [];
   let sigCum = 0;
   for (const t of sigSorted) {
     const mult = t.direction === "long" ? 1 : -1;
-    const pnl = t.qty * (t.signal_close_price - t.signal_entry_price) * mult;
-    sigCum += pnl;
+    sigCum += t.qty * (t.signal_close_price - t.signal_entry_price) * mult;
     sigLabels.push(fmtDateTime(t.closed_at));
     sigData.push(parseFloat(sigCum.toFixed(2)));
   }
-  const sigCtx = qs("#signal-pnl-chart").getContext("2d");
   const sigFinal = sigData.length ? sigData[sigData.length - 1] : 0;
   const sigLine = sigFinal >= 0 ? "#3ecf8e" : "#ef5b5b";
   const sigFill = sigFinal >= 0 ? "rgba(62,207,142,0.12)" : "rgba(239,91,91,0.12)";
-  if (_signalPnlChart) {
-    _signalPnlChart.data.labels = sigLabels;
-    _signalPnlChart.data.datasets[0].data = sigData;
-    _signalPnlChart.data.datasets[0].borderColor = sigLine;
-    _signalPnlChart.data.datasets[0].backgroundColor = sigFill;
-    _signalPnlChart.update();
-  } else {
-    _signalPnlChart = new Chart(sigCtx, {
-      type: "line",
-      data: {
-        labels: sigLabels,
-        datasets: [{
-          data: sigData,
-          borderColor: sigLine,
-          backgroundColor: sigFill,
-          borderWidth: 2,
-          pointRadius: sigData.length < 60 ? 3 : 0,
-          pointHoverRadius: 5,
-          fill: true,
-          tension: 0.3,
-        }],
-      },
-      options: {
-        responsive: true,
-        animation: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => " $" + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-            },
-          },
-        },
-        scales: {
-          x: { ticks: { color: "#7b8797", maxTicksLimit: 8, maxRotation: 0 }, grid: { color: "#1f2a37" } },
-          y: { ticks: { color: "#7b8797", callback: (v) => "$" + v.toLocaleString() }, grid: { color: "#1f2a37" } },
-        },
-      },
-    });
-  }
+
+  if (_signalPnlChart) { _signalPnlChart.destroy(); }
+  _signalPnlChart = new Chart(qs("#signal-pnl-chart").getContext("2d"), {
+    type: "line",
+    data: { labels: sigLabels, datasets: [{ data: sigData, borderColor: sigLine, backgroundColor: sigFill,
+      borderWidth: 2, pointRadius: sigData.length < 60 ? 3 : 0, pointHoverRadius: 5, fill: true, tension: 0 }] },
+    options: _makeChartOpts(
+      (ctx) => " $" + ctx.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+      (_, elements) => { if (elements.length) _jumpToTradeRow(_signalPnlChartRows[elements[0].index]); }
+    ),
+  });
 }
 
 // ---------- warnings ----------
@@ -1116,15 +1138,18 @@ function renderAll() {
 function wireFilters() {
   ["#pos-f-symbol", "#pos-f-interval"].forEach(s => qs(s).addEventListener("input", renderPositions));
   qs("#pos-f-interval").addEventListener("change", renderPositions);
-  ["#sig-f-symbol", "#sig-f-interval", "#sig-f-action", "#sig-f-status", "#sig-f-format"]
-    .forEach(s => qs(s).addEventListener("input", renderSignals));
-  ["#ord-f-symbol", "#ord-f-interval", "#ord-f-role", "#ord-f-type", "#ord-f-status"]
-    .forEach(s => qs(s).addEventListener("input", renderOrders));
-  ["#sig-f-interval", "#sig-f-action", "#sig-f-status", "#sig-f-format",
-   "#ord-f-interval", "#ord-f-role", "#ord-f-type", "#ord-f-status"]
-    .forEach(s => qs(s).addEventListener("change", () => {
-      if (s.startsWith("#sig")) renderSignals(); else renderOrders();
-    }));
+  ["#sig-f-symbol", "#sig-f-interval", "#sig-f-action", "#sig-f-status"]
+    .forEach(s => qs(s).addEventListener("input", () => fetchSignals(true)));
+  qs("#sig-f-format").addEventListener("input", renderSignals);
+  ["#sig-f-interval", "#sig-f-action", "#sig-f-status"]
+    .forEach(s => qs(s).addEventListener("change", () => fetchSignals(true)));
+  qs("#sig-f-format").addEventListener("change", renderSignals);
+  ["#ord-f-symbol", "#ord-f-interval", "#ord-f-role", "#ord-f-status"]
+    .forEach(s => qs(s).addEventListener("input", () => fetchOrders(true)));
+  qs("#ord-f-type").addEventListener("input", renderOrders);
+  ["#ord-f-interval", "#ord-f-role", "#ord-f-status"]
+    .forEach(s => qs(s).addEventListener("change", () => fetchOrders(true)));
+  qs("#ord-f-type").addEventListener("change", renderOrders);
 }
 
 // ---------- uptime polling (from /api/status) ----------
@@ -1132,6 +1157,8 @@ async function pollStatus() {
   try {
     const s = await apiFetch("/api/status");
     state.uptimeSeconds = s.uptime_seconds ?? 0;
+    state.sigCountToday = s.signals_today ?? 0;
+    state.ordCountToday = s.orders_today ?? 0;
     if (s.active_intervals) s.active_intervals.forEach(i => intervalsSeen.add(i));
     refreshIntervalOptions();
     renderStatusBar();
@@ -1227,6 +1254,17 @@ function renderClosedTrades() {
   totalEl.textContent = fmtUsd(totalPnl);
   totalEl.className = totalPnl >= 0 ? "pos" : "neg";
 
+  const totalSigPnl = rows.reduce((s, p) => {
+    if (p.signal_entry_price != null && p.signal_close_price != null && p.qty != null) {
+      const mult = p.direction === "long" ? 1 : -1;
+      return s + p.qty * (p.signal_close_price - p.signal_entry_price) * mult;
+    }
+    return s;
+  }, 0);
+  const sigPnlEl = qs("#ct-total-signal-pnl");
+  sigPnlEl.textContent = fmtUsd(totalSigPnl);
+  sigPnlEl.className = totalSigPnl >= 0 ? "pos" : "neg";
+
   renderPnlChart(rows);
   if (rows.length === 0) {
     tbody.innerHTML = `<tr><td colspan="11" class="empty">No closed trades yet.</td></tr>`;
@@ -1247,7 +1285,7 @@ function renderClosedTrades() {
     const sigPnl = (p.signal_entry_price != null && p.signal_close_price != null && p.qty != null)
       ? p.qty * (p.signal_close_price - p.signal_entry_price) * (p.direction === "long" ? 1 : -1)
       : null;
-    return `<tr>
+    return `<tr data-closed-at="${escapeHtml(p.closed_at || '')}">
       <td>${fmtDateTime(p.opened_at)}</td>
       <td>${fmtDateTime(p.closed_at)}</td>
       <td>${dur}</td>
@@ -1315,8 +1353,21 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") qs("#sig-modal").classList.remove("open");
 });
 
+// ---------- scroll-based infinite load ----------
+function setupScrollPaging() {
+  function makeObs(root, sentinel, fetchFn) {
+    new IntersectionObserver(
+      entries => { if (entries[0].isIntersecting) fetchFn(false); },
+      { root, threshold: 0 }
+    ).observe(sentinel);
+  }
+  makeObs(qs("#sig-scroll"), qs("#sig-sentinel"), fetchSignals);
+  makeObs(qs("#ord-scroll"), qs("#ord-sentinel"), fetchOrders);
+}
+
 // ---------- boot ----------
 wireFilters();
+setupScrollPaging();
 ["#ct-f-symbol", "#ct-f-interval", "#ct-f-dir"].forEach(s => qs(s).addEventListener("input", renderClosedTrades));
 ["#ct-f-interval", "#ct-f-dir"].forEach(s => qs(s).addEventListener("change", renderClosedTrades));
 renderAll();
