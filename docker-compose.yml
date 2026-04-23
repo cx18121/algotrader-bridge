@@ -16,6 +16,9 @@ services:
       - READ_ONLY_API=no
       - VNC_SERVER_PASSWORD=${VNC_PASSWORD:-changeme}
       - EXISTING_SESSION_DETECTED_ACTION=primary
+      - AUTO_RESTART_TIME=00:15
+      - RELOGIN_AFTER_TWOFA_TIMEOUT=yes
+      - TWOFA_TIMEOUT_ACTION=restart
     ports:
       - "4002:4002"   # Paper API port
       - "4001:4001"   # Live API port
