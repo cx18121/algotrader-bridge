@@ -390,7 +390,7 @@ class IBKRClient:
             return None
         try:
             contract = await _build_contract(symbol)
-            await self.ib.qualifyContractsAsync(contract)
+            await asyncio.wait_for(self.ib.qualifyContractsAsync(contract), timeout=10)
             order = MarketOrder(action, qty)
             trade = self.ib.placeOrder(contract, order)
             log.info(
@@ -417,7 +417,7 @@ class IBKRClient:
             return None
         try:
             contract = await _build_contract(symbol)
-            await self.ib.qualifyContractsAsync(contract)
+            await asyncio.wait_for(self.ib.qualifyContractsAsync(contract), timeout=10)
             order = Order()
             order.action = action
             order.orderType = "TRAIL"
