@@ -209,11 +209,14 @@ class IBKRClient:
                         "tws_reconnect_attempt",
                         extra={"host": cfg.tws_host, "port": cfg.tws_port, "client_id": cfg.tws_client_id},
                     )
-                    await self.ib.connectAsync(
-                        host=cfg.tws_host,
-                        port=cfg.tws_port,
-                        clientId=cfg.tws_client_id,
-                        readonly=False,
+                    await asyncio.wait_for(
+                        self.ib.connectAsync(
+                            host=cfg.tws_host,
+                            port=cfg.tws_port,
+                            clientId=cfg.tws_client_id,
+                            readonly=False,
+                        ),
+                        timeout=30,
                     )
                     self._connected = True
                     self._last_connected = datetime.now(timezone.utc)
@@ -223,6 +226,11 @@ class IBKRClient:
                     if self.on_status:
                         await self.on_status(True, None)
                     await self._reconcile_on_connect()
+                except asyncio.TimeoutError:
+                    self._disconnect_reason = "connect timeout (30s)"
+                    log.warning("tws_connect_timeout", extra={"host": cfg.tws_host, "port": cfg.tws_port})
+                    if self.on_status:
+                        await self.on_status(False, "connect timeout")
                 except Exception as e:
                     self._disconnect_reason = str(e)
                     log.warning("tws_connect_failed", extra={"error": str(e)})
@@ -308,11 +316,16 @@ class IBKRClient:
             open_orders = []
             if self.ib is not None:
                 ibkr_positions = await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=10)
-                open_orders = self.ib.reqOpenOrders() or []
+                open_orders = await asyncio.wait_for(
+                    asyncio.to_thread(self.ib.reqOpenOrders), timeout=10
+                ) or []
             log.info(
                 "startup_position_sync",
                 extra={"ibkr_positions": len(ibkr_positions), "open_orders": len(open_orders)},
             )
+        except asyncio.TimeoutError:
+            log.warning("reconcile_on_connect_timeout", extra={"error": "timeout after 10s"})
+            return
         except Exception as e:
             log.warning("reconcile_on_connect_failed", extra={"error": str(e)})
             return
@@ -458,7 +471,7 @@ class IBKRClient:
         if self.ib is None or not self.connected:
             return []
         try:
-            positions = await self.ib.reqPositionsAsync()
+            positions = await asyncio.wait_for(self.ib.reqPositionsAsync(), timeout=10)
             return [
                 {
                     "symbol": getattr(p.contract, "symbol", None),
@@ -476,7 +489,7 @@ class IBKRClient:
             return {}
         try:
             tags = ["NetLiquidation", "TotalCashValue", "UnrealizedPnL", "RealizedPnL", "EquityWithLoanValue"]
-            values = await self.ib.accountSummaryAsync()
+            values = await asyncio.wait_for(self.ib.accountSummaryAsync(), timeout=10)
             result: dict[str, float] = {}
             for v in values:
                 if v.tag in tags and v.currency in ("USD", ""):
