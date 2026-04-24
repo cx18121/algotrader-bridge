@@ -72,6 +72,17 @@ async def lifespan(app: FastAPI):
     _configure_logging()
     log.info("server_starting")
     cfg = settings()
+    use_mock = os.getenv("IBKR_MOCK", "").lower() in ("1", "true", "yes")
+    cfg.validate_runtime_guardrails(ibkr_mock=use_mock)
+    log.info(
+        "runtime_guardrails_validated",
+        extra={
+            "trading_mode": cfg.trading_mode,
+            "tws_port": cfg.tws_port,
+            "expected_ibkr_account": cfg.expected_ibkr_account,
+            "allowed_symbols": cfg.allowed_symbols,
+        },
+    )
     app_state["start_time"] = datetime.now(timezone.utc)
 
     # DB
@@ -90,7 +101,6 @@ async def lifespan(app: FastAPI):
     webhook_module.set_broadcast(ws_manager.broadcast)
 
     # IBKR client — use mock if env var set (for tests).
-    use_mock = os.getenv("IBKR_MOCK", "").lower() in ("1", "true", "yes")
     ibkr: IBKRClient
     if use_mock:
         log.info("ibkr_using_mock")

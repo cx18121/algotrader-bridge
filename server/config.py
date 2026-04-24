@@ -93,8 +93,14 @@ def _env_float(key: str, default: float) -> float:
 
 @dataclass
 class Settings:
+    # Deployment identity / mode separation
+    trading_mode: str = "paper"
+    live_trading_enabled: bool = False
+    expected_ibkr_account: Optional[str] = None
+    allowed_symbols: list[str] = field(default_factory=list)
+
     # Webhook
-    webhook_secret: str
+    webhook_secret: str = ""
     webhook_rate_limit_rps: int = 10
 
     # TWS
@@ -126,6 +132,7 @@ class Settings:
     # Risk
     max_position_size: int = 1000
     max_open_positions: int = 10
+    max_daily_realized_loss: float = 0.0
 
     # Dedup
     dedup_window_seconds: int = 5
@@ -241,6 +248,55 @@ class Settings:
                 log.warning("invalid_symbol_trail_offset", extra={"key": key, "value": v})
         return self.trail_offset_points
 
+    def validate_runtime_guardrails(self, *, ibkr_mock: bool = False) -> None:
+        """Fail closed on unsafe live/paper configuration.
+
+        Live and paper deployments should differ by env only. These checks make
+        live trading explicitly opt-in and prevent common cross-wiring mistakes.
+        """
+        if self.trading_mode not in ("paper", "live"):
+            raise RuntimeError(
+                f"Invalid TRADING_MODE value: {self.trading_mode}. Must be paper or live."
+            )
+        if self.default_qty <= 0:
+            raise RuntimeError("DEFAULT_QTY must be greater than zero.")
+        if self.max_position_size <= 0:
+            raise RuntimeError("MAX_POSITION_SIZE must be greater than zero.")
+        if self.max_open_positions <= 0:
+            raise RuntimeError("MAX_OPEN_POSITIONS must be greater than zero.")
+        if self.default_qty > self.max_position_size:
+            raise RuntimeError("DEFAULT_QTY cannot exceed MAX_POSITION_SIZE.")
+
+        if self.trading_mode == "live":
+            if ibkr_mock:
+                raise RuntimeError("IBKR_MOCK cannot be enabled when TRADING_MODE=live.")
+            if not self.live_trading_enabled:
+                raise RuntimeError(
+                    "TRADING_MODE=live requires LIVE_TRADING_ENABLED=true."
+                )
+            if not self.expected_ibkr_account:
+                raise RuntimeError(
+                    "TRADING_MODE=live requires EXPECTED_IBKR_ACCOUNT to prevent account mixups."
+                )
+            if self.webhook_secret in ("change_me_min_32_chars_recommended", "changeme"):
+                raise RuntimeError("WEBHOOK_SECRET must be changed before live trading.")
+            if len(self.webhook_secret) < 32:
+                raise RuntimeError("WEBHOOK_SECRET must be at least 32 characters in live mode.")
+            if self.dashboard_auth == "none":
+                raise RuntimeError("DASHBOARD_AUTH=none is not allowed in live mode.")
+
+            if self.tws_port not in (4001, 7496):
+                log.warning(
+                    "live_mode_nonstandard_tws_port",
+                    extra={"tws_port": self.tws_port, "expected_ports": [4001, 7496]},
+                )
+        else:
+            if self.tws_port in (4001, 7496):
+                log.warning(
+                    "paper_mode_live_tws_port",
+                    extra={"tws_port": self.tws_port, "expected_ports": [4002, 7497]},
+                )
+
 
 def load_settings() -> Settings:
     """Load all env vars, validate the required ones, return a Settings object."""
@@ -294,7 +350,20 @@ def load_settings() -> Settings:
         except json.JSONDecodeError as e:
             log.warning("contract_map_invalid_json", extra={"error": str(e)})
 
+    trading_mode = os.getenv("TRADING_MODE", "paper").strip().lower()
+
+    expected_account = os.getenv("EXPECTED_IBKR_ACCOUNT", "").strip() or None
+    allowed_symbols = [
+        s.strip().upper()
+        for s in os.getenv("ALLOWED_SYMBOLS", "").split(",")
+        if s.strip()
+    ]
+
     return Settings(
+        trading_mode=trading_mode,
+        live_trading_enabled=_env_bool("LIVE_TRADING_ENABLED", False),
+        expected_ibkr_account=expected_account,
+        allowed_symbols=allowed_symbols,
         webhook_secret=secret,
         webhook_rate_limit_rps=_env_int("WEBHOOK_RATE_LIMIT_RPS", 10),
         tws_host=os.getenv("TWS_HOST", "127.0.0.1"),
@@ -310,6 +379,7 @@ def load_settings() -> Settings:
         disable_trail=_env_bool("DISABLE_TRAIL", False),
         max_position_size=_env_int("MAX_POSITION_SIZE", 1000),
         max_open_positions=_env_int("MAX_OPEN_POSITIONS", 10),
+        max_daily_realized_loss=_env_float("MAX_DAILY_REALIZED_LOSS", 0.0),
         dedup_window_seconds=_env_int("DEDUP_WINDOW_SECONDS", 5),
         ignore_short_signals=_env_bool("IGNORE_SHORT_SIGNALS", False),
         partial_fill_replacement_mode=partial_mode,

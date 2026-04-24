@@ -782,6 +782,12 @@ class OrderRouter:
         re_entering: bool = False,
     ) -> Optional[str]:
         cfg = settings()
+        if cfg.allowed_symbols and symbol.upper() not in cfg.allowed_symbols:
+            return f"symbol {symbol} is not in ALLOWED_SYMBOLS"
+
+        if cfg.trading_mode == "live" and not cfg.live_trading_enabled:
+            return "live trading is not explicitly enabled"
+
         # Check 4: max position size (per symbol, interval).
         current = await self._get_open_position(symbol, direction, interval)
         cur_qty = current.qty if current else 0
@@ -801,6 +807,20 @@ class OrderRouter:
                 count = res.scalar_one() or 0
             if count >= cfg.max_open_positions:
                 return f"exceeds max open positions of {cfg.max_open_positions}"
+
+        if cfg.max_daily_realized_loss > 0:
+            midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            async with get_session() as session:
+                res = await session.execute(
+                    select(sql_func.coalesce(sql_func.sum(TradeHistory.realized_pnl), 0.0))
+                    .where(TradeHistory.closed_at >= midnight)
+                )
+                realized_today = float(res.scalar_one() or 0.0)
+            if realized_today <= -abs(cfg.max_daily_realized_loss):
+                return (
+                    "daily realized loss limit reached "
+                    f"({realized_today:.2f} <= -{abs(cfg.max_daily_realized_loss):.2f})"
+                )
         return None
 
     async def _reject(self, signal_id: int, reason: str) -> None:

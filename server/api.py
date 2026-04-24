@@ -168,9 +168,14 @@ async def get_status(request: Request) -> StatusOut:
 
     return StatusOut(
         server="ok",
+        trading_mode=settings().trading_mode,
+        live_trading_enabled=settings().live_trading_enabled,
+        expected_ibkr_account=settings().expected_ibkr_account,
+        connected_ibkr_accounts=getattr(ibkr, "account_ids", []),
+        allowed_symbols=settings().allowed_symbols,
         tws_connected=bool(getattr(ibkr, "connected", False)),
-        tws_last_connected=getattr(ibkr, "last_connected_at", None),
-        tws_disconnect_reason=getattr(ibkr, "last_disconnect_reason", None),
+        tws_last_connected=getattr(ibkr, "last_connected", None),
+        tws_disconnect_reason=getattr(ibkr, "disconnect_reason", None),
         uptime_seconds=uptime,
         signals_today=int(signals_today or 0),
         orders_today=int(orders_today or 0),

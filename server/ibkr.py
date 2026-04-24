@@ -149,6 +149,7 @@ class IBKRClient:
         self._connected: bool = False
         self._last_connected: Optional[datetime] = None
         self._disconnect_reason: Optional[str] = None
+        self._account_ids: list[str] = []
         self._reconnect_task: Optional[asyncio.Task] = None
         self._stop_reconnect = asyncio.Event()
         self._next_order_id = 1_000_000  # for mock path only
@@ -169,6 +170,10 @@ class IBKRClient:
     @property
     def disconnect_reason(self) -> Optional[str]:
         return self._disconnect_reason
+
+    @property
+    def account_ids(self) -> list[str]:
+        return list(self._account_ids)
 
     async def start(self) -> None:
         """Start connection attempts in the background."""
@@ -221,11 +226,14 @@ class IBKRClient:
                     self._connected = True
                     self._last_connected = datetime.now(timezone.utc)
                     self._disconnect_reason = None
-                    log.info("tws_connected", extra={"host": cfg.tws_host, "port": cfg.tws_port})
-                    self._wire_events()
-                    if self.on_status:
-                        await self.on_status(True, None)
-                    await self._reconcile_on_connect()
+                    if not await self._validate_account_guardrail():
+                        self._connected = False
+                    else:
+                        log.info("tws_connected", extra={"host": cfg.tws_host, "port": cfg.tws_port})
+                        self._wire_events()
+                        if self.on_status:
+                            await self.on_status(True, None)
+                        await self._reconcile_on_connect()
                 except asyncio.TimeoutError:
                     self._disconnect_reason = "connect timeout (30s)"
                     log.warning("tws_connect_timeout", extra={"host": cfg.tws_host, "port": cfg.tws_port})
@@ -243,6 +251,57 @@ class IBKRClient:
                 )
             except asyncio.TimeoutError:
                 continue
+
+    async def _validate_account_guardrail(self) -> bool:
+        """Verify the connected IBKR session is the configured account.
+
+        This is especially important on live deployments where paper/live
+        sessions can be accidentally cross-wired by credentials or ports.
+        """
+        cfg = settings()
+        self._account_ids = []
+        try:
+            accounts = []
+            if self.ib is not None:
+                accounts = list(self.ib.managedAccounts() or [])
+            self._account_ids = [str(a) for a in accounts if a]
+        except Exception as e:
+            reason = f"managedAccounts failed: {e}"
+            self._disconnect_reason = reason
+            log.warning("ibkr_account_guardrail_failed", extra={"reason": reason})
+            if self.on_status:
+                await self.on_status(False, reason)
+            return False
+
+        expected = cfg.expected_ibkr_account
+        if expected and expected not in self._account_ids:
+            reason = (
+                f"connected IBKR accounts {self._account_ids} do not include "
+                f"EXPECTED_IBKR_ACCOUNT={expected}"
+            )
+            self._disconnect_reason = reason
+            log.error(
+                "ibkr_account_mismatch",
+                extra={"expected": expected, "connected_accounts": self._account_ids},
+            )
+            try:
+                if self.ib is not None and self.ib.isConnected():
+                    self.ib.disconnect()
+            except Exception:
+                pass
+            if self.on_status:
+                await self.on_status(False, reason)
+            return False
+
+        log.info(
+            "ibkr_account_guardrail_ok",
+            extra={
+                "expected": expected,
+                "connected_accounts": self._account_ids,
+                "trading_mode": cfg.trading_mode,
+            },
+        )
+        return True
 
     def _wire_events(self) -> None:
         if self.ib is None:
@@ -536,6 +595,7 @@ class MockIBKRClient(IBKRClient):
         self._connected = True
         self._last_connected = datetime.now(timezone.utc)
         self._disconnect_reason = None
+        self._account_ids = [settings().expected_ibkr_account or "MOCK-PAPER"]
         if self.on_status:
             await self.on_status(True, None)
 

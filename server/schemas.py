@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class _Out(BaseModel):
@@ -96,6 +96,11 @@ class AccountOut(_Out):
 
 class StatusOut(BaseModel):
     server: str
+    trading_mode: str = "paper"
+    live_trading_enabled: bool = False
+    expected_ibkr_account: Optional[str] = None
+    connected_ibkr_accounts: list[str] = Field(default_factory=list)
+    allowed_symbols: list[str] = Field(default_factory=list)
     tws_connected: bool
     tws_last_connected: Optional[datetime] = None
     tws_disconnect_reason: Optional[str] = None
@@ -107,7 +112,7 @@ class StatusOut(BaseModel):
     maintenance_mode: str = "normal"  # "normal" | "pre_close" | "maintenance"
     maintenance_message: str = ""
     maintenance_resumes_at: Optional[str] = None
-    active_intervals: list[str] = []
+    active_intervals: list[str] = Field(default_factory=list)
 
 
 class SlippageByInterval(BaseModel):
