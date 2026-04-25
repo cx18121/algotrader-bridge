@@ -19,10 +19,9 @@ services:
       - AUTO_RESTART_TIME=00:15
       - RELOGIN_AFTER_TWOFA_TIMEOUT=yes
       - TWOFA_TIMEOUT_ACTION=restart
-    ports:
-      - "4002:4002"   # Paper API port
-      - "4001:4001"   # Live API port
-      - "8000:8000"   # Bridge app (shares this network namespace)
+    # IBKR API ports stay internal on the Docker network; the bridge connects
+    # to ib-gateway:4002/4001 by service name.
+    # Exposing these to the public VPS interface is unnecessary and risky.
     healthcheck:
       # 0FA2 = 4002 (paper). Change to 0FA1 for live trading.
       test: ["CMD-SHELL", "cat /proc/net/tcp* | grep -qE '0FA2|0FA1' || exit 1"]
@@ -35,16 +34,16 @@ services:
 
   # -------------------------------------------------------
   # AlgoTrader Bridge (webhook → order router → IB Gateway)
-  # Shares the ib-gateway network so TWS_HOST=127.0.0.1 works.
+  # Connects to IB Gateway over the Docker service network. This keeps bridge
+  # reconnect behavior independent from Gateway container restarts.
   # -------------------------------------------------------
   bridge:
     build: .
     restart: unless-stopped
-    network_mode: "service:ib-gateway"
     env_file:
       - .env
     environment:
-      - TWS_HOST=127.0.0.1
+      - TWS_HOST=ib-gateway
       - TWS_PORT=${TWS_PORT:-4002}               # 4002=paper, 4001=live
       - DB_PATH=/app/data/trading.db
     volumes:
@@ -71,7 +70,7 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
-      ib-gateway:
+      bridge:
         condition: service_healthy
 
   # -------------------------------------------------------
