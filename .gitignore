@@ -41,3 +41,6 @@ env/
 
 # Planning docs
 .planning/
+
+# TradingView reference material
+tradingview_reference/
