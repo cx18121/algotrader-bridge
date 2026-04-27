@@ -23,6 +23,7 @@ services:
       - "4002:4002"   # Paper API port
       - "4001:4001"   # Live API port
       - "8000:8000"   # Bridge app (shares this network namespace)
+      - "6080:6080"   # noVNC web UI (built into ib-gateway image)
     healthcheck:
       # 0FA2 = 4002 (paper). Change to 0FA1 for live trading.
       test: ["CMD-SHELL", "cat /proc/net/tcp* | grep -qE '0FA2|0FA1' || exit 1"]
@@ -74,20 +75,6 @@ services:
       ib-gateway:
         condition: service_healthy
 
-  # -------------------------------------------------------
-  # noVNC — web UI to visually verify IB Gateway login
-  # Open http://YOUR_SERVER_IP:6080 in a browser.
-  # -------------------------------------------------------
-  novnc:
-    image: alpine
-    command: >
-      sh -c "apk add --no-cache novnc websockify &&
-             websockify --web=/usr/share/novnc 6080 ib-gateway:5900"
-    ports:
-      - "6080:6080"
-    depends_on:
-      - ib-gateway
-    restart: unless-stopped
 
 volumes:
   trading_data:
